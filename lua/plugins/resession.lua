@@ -1,0 +1,56 @@
+-- Sessions, named after the active neoscopes scope when there is one so each
+-- scope keeps its own layout.
+local function scoped(action)
+  return function()
+    action(require('util.scope').name() or 'workspace')
+  end
+end
+
+return {
+  {
+    'stevearc/resession.nvim',
+    dependencies = { 'cbochs/grapple.nvim' },
+    keys = {
+      {
+        '<leader>ws',
+        function()
+          scoped(require('resession').save)()
+        end,
+        desc = 'save_session',
+      },
+      {
+        '<leader>wl',
+        function()
+          scoped(require('resession').load)()
+        end,
+        desc = 'load_session',
+      },
+      {
+        '<leader>wS',
+        function()
+          require('resession').save()
+        end,
+        desc = 'save_manual_session',
+      },
+      {
+        '<leader>wL',
+        function()
+          require('resession').load()
+        end,
+        desc = 'load_manual_session',
+      },
+      {
+        '<leader>wd',
+        function()
+          require('resession').delete()
+        end,
+        desc = 'delete_session',
+      },
+    },
+    opts = {
+      extensions = {
+        overseer = { recent_first = true },
+      },
+    },
+  },
+}

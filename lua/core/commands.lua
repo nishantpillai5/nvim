@@ -1,0 +1,5 @@
+vim.api.nvim_create_user_command('ClearShada', function()
+  local shadapath = vim.fs.joinpath(vim.fn.stdpath 'data', 'shada')
+  vim.fs.rm(shadapath, { recursive = true, force = true })
+  vim.notify('Cleared ' .. shadapath)
+end, { desc = "Delete this config's shada files" })
