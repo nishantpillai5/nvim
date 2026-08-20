@@ -275,11 +275,22 @@ local function slash_command_names()
   return names
 end
 
--- nvim-cmp source, active only in the prompt float (via vim.b.claude_prompt).
-
 -- Native replacement for the old nvim-cmp source: completes @file paths and
 -- /commands inside the prompt buffer. nvim-cmp is not part of this config, so
 -- this drives the built-in popup menu with vim.fn.complete() instead.
+--
+-- Two things about the built-in menu make a *path* different from a keyword, and
+-- both are why this is re-driven from a TextChanged autocmd (see
+-- attach_completion) rather than only from <C-n>:
+--
+--  * the menu ends as soon as you type a character outside 'iskeyword', and "/"
+--    is exactly that -- so a path could never be typed past its first slash;
+--  * complete() takes a *static* candidate list, so the list computed for "@lua"
+--    still holds the parent's entries once you reach "@lua/" and would never
+--    offer what is inside the directory.
+--
+-- Recomputing from scratch on every typed character fixes both, and restores the
+-- as-you-type menu the nvim-cmp source used to give.
 local function prompt_complete()
   local before = vim.api.nvim_get_current_line():sub(1, vim.fn.col '.' - 1)
 
@@ -291,7 +302,7 @@ local function prompt_complete()
       items[#items + 1] = { word = '/' .. name, kind = 'f' }
     end
     vim.fn.complete(start, items)
-    return
+    return true
   end
 
   -- @file: complete the last @token as a path relative to cwd.
@@ -303,7 +314,37 @@ local function prompt_complete()
       items[#items + 1] = { word = '@' .. path, kind = path:sub(-1) == '/' and 'd' or 'f' }
     end
     vim.fn.complete(at, items)
+    return true
   end
+  return false
+end
+
+-- Keep the menu in step with what you type inside an @path or /command token.
+-- InsertCharPre fires only for a literally typed character and never for the
+-- text the menu itself inserts as you move through it, so it is what separates a
+-- keystroke from a selection -- without it, <C-n> would insert a match, retrigger
+-- this, and rebuild the menu out from under the cursor. TextChangedP is needed
+-- alongside TextChangedI because only it fires while the menu is open.
+local function attach_completion(buf)
+  local typed = false
+  vim.api.nvim_create_autocmd('InsertCharPre', {
+    buffer = buf,
+    callback = function()
+      typed = true
+    end,
+  })
+  vim.api.nvim_create_autocmd({ 'TextChangedI', 'TextChangedP' }, {
+    buffer = buf,
+    callback = function()
+      if not typed then
+        return
+      end
+      typed = false
+      -- Swallow errors rather than let a bad keystroke report on every
+      -- character typed into the box.
+      pcall(prompt_complete)
+    end,
+  })
 end
 
 local ghost_ns = vim.api.nvim_create_namespace 'claude_prompt_ghost'
@@ -475,6 +516,18 @@ local function open_prompt_input()
   -- per-buffer guard -- left alone it renders its own FIM ghost (green) and
   -- rebinds <Tab> on the empty buffer, clobbering Claude's suggestion. So
   -- suppress llama while the box is empty, then re-enable it once you type.
+  -- Neovim decides whether the completion menu fits below the cursor from
+  -- 'pumheight' rather than the real candidate count, and this box sits at the
+  -- vertical centre -- so at the config-wide 12 the menu flips *above* the cursor
+  -- on a 24-row terminal and lands on the box, hiding the line being typed. 8
+  -- keeps it below from 24 rows up. Restored on close, so completion everywhere
+  -- else keeps the taller menu.
+  local saved_pumheight = vim.o.pumheight
+  vim.o.pumheight = math.min(saved_pumheight, 8)
+  local function restore_pumheight()
+    vim.o.pumheight = saved_pumheight
+  end
+
   local llama_on = vim.fn.exists '#llama' == 1
   local llama_suppressed = false
   local function suppress_llama()
@@ -548,7 +601,12 @@ local function open_prompt_input()
     vim.api.nvim_buf_set_extmark(buf, ghost_ns, 0, 0, ext)
   end
 
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+  -- TextChangedP belongs here alongside TextChangedI: only it fires while the
+  -- completion menu is open, and the menu now stays open for as long as you are
+  -- typing a path. Without it the box freezes at whatever height it had when the
+  -- menu appeared, so a prompt that wraps past that height scrolls out of sight
+  -- while you type. Resizing the float does not disturb the open menu.
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'TextChangedP' }, {
     buffer = buf,
     callback = function()
       fit_height()
@@ -561,7 +619,10 @@ local function open_prompt_input()
   vim.api.nvim_create_autocmd('BufWipeout', {
     buffer = buf,
     once = true,
-    callback = restore_llama,
+    callback = function()
+      restore_llama()
+      restore_pumheight()
+    end,
   })
 
   local closed = false
@@ -571,6 +632,7 @@ local function open_prompt_input()
     end
     closed = true
     clear_origin_highlight()
+    restore_pumheight()
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
@@ -622,7 +684,11 @@ local function open_prompt_input()
   end
 
   -- Completion keys are buffer-local, driving the built-in popup menu. <C-e>
-  -- needs no mapping -- Neovim already aborts completion with it.
+  -- needs no mapping -- Neovim already aborts completion with it. The menu also
+  -- opens and refreshes as you type; <C-n> stays as the explicit trigger for
+  -- reopening it after <C-e>.
+  attach_completion(buf)
+
   local function feed(keys)
     vim.api.nvim_feedkeys(vim.keycode(keys), 'n', false)
   end

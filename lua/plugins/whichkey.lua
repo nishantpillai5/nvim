@@ -33,15 +33,28 @@ return {
           { '<leader>ey', group = 'Yank' },
           { '<leader>i', group = 'Config' },
           { '<leader>l', group = 'LSP', mode = { 'n', 'v' } },
+          { '<leader>n', group = 'Notes', mode = { 'n', 'v' } },
           { '<leader>o', group = 'Tasks' },
           { '<leader>oR', group = 'Run_Cmd' },
           { '<leader>ow', group = 'Save' },
           { '<leader>r', group = 'Refactor', mode = { 'n', 'v' } },
+          { '<leader>V', group = 'Surround' },
           { '<leader>w', group = 'Workspace' },
           { '<leader>ww', group = 'Worktree' },
           { '<leader>z', group = 'Visual', mode = { 'n', 'v' } },
           { '<leader>zO', group = 'Run' },
           { '<leader>zp', group = 'Pomodoro' },
+          -- nvim-biscuits registers <leader>zC itself, from `toggle_keybind`.
+          { '<leader>zC', desc = 'context_virtual' },
+          -- mini.surround installs its own mappings once loaded, overwriting
+          -- the descs on lazy's key stubs with its own sentence-case ones.
+          { '<leader>v', desc = 'surround', mode = { 'n', 'x' } },
+          { '<leader>Vd', desc = 'delete' },
+          { '<leader>Vf', desc = 'find' },
+          { '<leader>VF', desc = 'find_left' },
+          { '<leader>Vh', desc = 'highlight' },
+          { '<leader>Vr', desc = 'replace' },
+          { '<leader>Vn', desc = 'update_n_lines' },
           -- trailblazer sets these itself, with no desc to read.
           { 'm', group = 'Marks' },
           { 'mD', desc = 'delete_all' },

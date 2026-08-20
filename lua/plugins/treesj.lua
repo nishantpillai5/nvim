@@ -1,6 +1,6 @@
--- NOTE: needs a treesitter parser for the buffer's language. nvim-treesitter is
--- pulled in as a dependency but is not configured in this config yet, so only
--- the parsers Neovim bundles will split/join.
+-- NOTE: needs a treesitter parser for the buffer's language. plugins/treesitter.lua
+-- installs the list this config cares about; anything outside it, plus whatever
+-- Neovim bundles, will not split/join.
 return {
   {
     'Wansmer/treesj',

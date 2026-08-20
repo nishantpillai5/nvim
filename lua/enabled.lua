@@ -17,6 +17,9 @@ return {
   'Mofiqul/vscode.nvim',
 
   -- LSP, completion, formatting, linting --------------------------------------
+  'nvim-treesitter/nvim-treesitter',
+  'nvim-treesitter/nvim-treesitter-context',
+  'code-biscuits/nvim-biscuits',
   'mason-org/mason.nvim',
   'folke/lazydev.nvim',
   'b0o/schemastore.nvim',
@@ -47,6 +50,7 @@ return {
   'gbprod/yanky.nvim',
   'mbbill/undotree',
   'Wansmer/treesj',
+  'echasnovski/mini.surround',
   'nishantpillai5/todo-comments.nvim',
   'andrewferrier/debugprint.nvim',
   'kevinhwang91/nvim-ufo',
@@ -79,6 +83,11 @@ return {
   'nvim-telescope/telescope-project.nvim',
   'aymericbeaumet/vim-symlink',
 
+  -- Notes ---------------------------------------------------------------------
+  'obsidian-nvim/obsidian.nvim',
+  'backdround/global-note.nvim',
+  'mattn/calendar-vim',
+
   -- AI ------------------------------------------------------------------------
   'ggml-org/llama.vim',
   'coder/claudecode.nvim',
@@ -99,6 +108,7 @@ return {
   'epwalsh/pomo.nvim',
   'NStefan002/screenkey.nvim',
   'aikhe/wrapped.nvim',
+  'kwakzalver/duckytype.nvim',
   'eandrju/cellular-automaton.nvim',
   'seandewar/killersheep.nvim',
 }

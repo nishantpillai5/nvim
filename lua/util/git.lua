@@ -22,6 +22,16 @@ function M.main_branch()
   return cached_main
 end
 
+-- Current branch name, or nil on a detached HEAD or outside a repo.
+function M.branch()
+  local res = vim.system({ 'git', 'symbolic-ref', '--short', 'HEAD' }, { text = true }):wait()
+  if res.code ~= 0 then
+    return nil
+  end
+  local out = vim.trim(res.stdout or '')
+  return out ~= '' and out or nil
+end
+
 function M.merge_base(branch)
   branch = (branch and branch ~= '') and branch or M.main_branch()
   local res = vim.system({ 'git', 'merge-base', 'HEAD', branch }, { text = true }):wait()

@@ -87,18 +87,19 @@ map('n', '<leader>eO', function()
 end, { desc = 'open_explorer' })
 
 -- Yank the current file's path in various forms
-for lhs, modifier in pairs {
-  ['<leader>eyy'] = '%:p',
-  ['<leader>eyY'] = '%',
-  ['<leader>eyf'] = '%:t',
-  ['<leader>eyF'] = '%:p:h',
+for lhs, spec in pairs {
+  ['<leader>eyy'] = { '%:p', 'yank_absolute_path' },
+  ['<leader>eyY'] = { '%', 'yank_relative_path' },
+  ['<leader>eyf'] = { '%:t', 'yank_filename' },
+  ['<leader>eyF'] = { '%:p:h', 'yank_folder' },
 } do
+  local modifier, desc = spec[1], spec[2]
   map('n', lhs, function()
     local value = vim.fn.expand(modifier)
     vim.fn.setreg('*', value)
     vim.fn.setreg('+', value)
     vim.notify('Yanked: ' .. value)
-  end, { desc = 'yank_path ' .. modifier })
+  end, { desc = desc })
 end
 
 -- Copy a terminal buffer's scrollback into a scratch `log` buffer, so the output
