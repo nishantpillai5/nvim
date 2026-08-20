@@ -1,0 +1,12 @@
+# The Dockerfile COPYs the config in to warm up lazy, treesitter and mason at
+# build time, so the context is no longer empty -- but none of this belongs in it.
+.git
+.gitignore
+.dockerignore
+.devcontainer.json
+Dockerfile
+docker-compose.yml
+.env
+.claude
+nvim.log
+*.png

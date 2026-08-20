@@ -1,0 +1,35 @@
+{
+  // For working *on* this config with Claude Code behind a firewall -- not for
+  // running it. That is ./Dockerfile and docker-compose.yml, which build an Arch
+  // box with neovim in it; this image only carries node and the CLI.
+  "image": "mcr.microsoft.com/devcontainers/typescript-node",
+  "features": {
+    "ghcr.io/devcontainers/features/nix:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/w3cj/devcontainer-features/firewall:latest": {
+      "verbose": true,
+      "githubIps": true,
+      "githubDomains": true,
+      "npmRegistry": true,
+      "anthropicIps": true,
+      "anthropicApi": true,
+      "openaiApi": false,
+      "claudeCode": true,
+      "pypi": true,
+      "dnsPublic": false
+    }
+  },
+  "mounts": [
+    "source=claude-code-config,target=/home/vscode/.claude,type=volume",
+    // util.env's DIR_NOTES, so the notes plugins have a vault to point at.
+    "source=${localEnv:HOME}/notes,target=/home/vscode/notes,type=bind,consistency=cached"
+  ],
+  "containerEnv": {
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  // The config's own paths assume ~/.config/nvim -- DIR_NVIM, the `<leader>ii`
+  // source maps, lua/enabled.lua's loader -- so put the workspace where they
+  // expect it rather than leaving it only at /workspaces.
+  "postCreateCommand": "mkdir -p ~/.config && ln -sfn ${containerWorkspaceFolder} ~/.config/nvim"
+}

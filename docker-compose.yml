@@ -1,0 +1,46 @@
+# `docker compose run --rm nvim` opens this config in the container built by
+# ./Dockerfile. Plugins, parsers and mason packages are baked into the image, so
+# the first run is not a download.
+services:
+  nvim:
+    image: docker-nvim
+    build:
+      dockerfile: ./Dockerfile
+      args:
+        # Only matters on Linux, where the bind mount below keeps the host's uid.
+        # Write them once with:
+        #   printf 'UID=%s\nGID=%s\n' "$(id -u)" "$(id -g)" > .env
+        # Leave unset on macOS -- Docker Desktop ignores ownership, and real macOS
+        # ids would fail the build (GID 20 is `staff` there, `dialout` on Arch).
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    volumes:
+      # The config, live from the host -- including lazy-lock.json, so a plugin
+      # update inside the container is a change you can commit outside it.
+      - .:/home/nvimuser/.config/nvim
+      # Plugin clones, mason binaries and treesitter parsers. Seeded from the
+      # image the first time this volume is created; see the Dockerfile.
+      - nvim-local:/home/nvimuser/.local
+      # `claude login` writes here. A volume rather than a bind of the host's
+      # ~/.claude, so a throwaway box never sees the real credentials -- the same
+      # call .devcontainer.json makes.
+      - claude-config:/home/nvimuser/.claude
+      # util.env's DIR_NOTES. obsidian, calendar and global-note all read it, and
+      # obsidian's `event` never fires without it.
+      - ${HOME}/notes:/home/nvimuser/notes
+    environment:
+      # core/options.lua reads this and routes the `"+` maps through OSC 52, since
+      # a container has no display server for xclip to talk to.
+      NVIM_CONTAINER: '1'
+      # Passed through when set, so `claude` works without an interactive login.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+      DISABLE_AUTOUPDATER: '1'
+    working_dir: /home/nvimuser/.config/nvim
+    # nvim is a TUI: `compose up` gives it no terminal without these.
+    stdin_open: true
+    tty: true
+
+volumes:
+  nvim-local:
+  claude-config:

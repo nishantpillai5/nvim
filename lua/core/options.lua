@@ -1,7 +1,3 @@
--- Only non-defaults belong here. Verified against `nvim --clean` on 0.12, so
--- incsearch / autoread / showcmd / autochdir are absent: they
--- already hold these values. termguicolors is absent too -- Neovim detects
--- terminal truecolor support itself, and forcing it breaks terminals that lack it.
 local env = require 'util.env'
 
 -- Line wrap
@@ -40,13 +36,11 @@ vim.o.inccommand = 'split'
 -- Scrolling
 vim.o.scrolloff = 8
 
--- Completion. `fuzzy` and `popup` are 0.11+; together with vim.lsp.completion
--- (see core/lsp.lua) they cover what nvim-cmp used to do.
+-- Completion
 vim.o.completeopt = 'menu,menuone,noselect,fuzzy,popup'
 vim.o.pumheight = 12
 
--- 0.12: one global border for every floating window -- hover, signature help,
--- diagnostics floats -- instead of configuring each producer separately.
+-- Global border for every floating window
 vim.o.winborder = 'rounded'
 
 -- Splits
@@ -57,12 +51,7 @@ vim.o.splitkeep = 'screen'
 -- Force show tabline
 vim.o.showtabline = 2
 
--- One statusline for the whole editor, matching lualine's globalstatus. This
--- has to be set here, at startup, not left to lualine's own opts: dashboard-nvim
--- snapshots laststatus when it opens at VimEnter and restores that snapshot when
--- you leave it, which lands after lualine loads on VeryLazy and would put the
--- old value back. Without this, every window -- including telescope's floats --
--- draws its own statusline.
+-- One statusline for the whole editor, matching lualine's globalstatus.
 vim.o.laststatus = 3
 
 -- How long a pending mapping waits. which-key shows its menu after this.
@@ -73,3 +62,12 @@ vim.o.showcmdloc = 'last'
 
 vim.g.have_nerd_font = true
 vim.g.python3_host_prog = env.NVIM_PYTHON
+
+-- In the container (docker-compose.yml sets NVIM_CONTAINER) there is no display
+-- server, so xclip and wl-clipboard would have nothing to talk to and the `"+`
+-- maps in core/keymaps.lua would be inert. OSC 52 sends the yank to the host's
+-- terminal instead. Copy is widely supported; paste needs the terminal to answer
+-- the query, which many do not, so `<leader>p` may still come up empty.
+if vim.env.NVIM_CONTAINER then
+  vim.g.clipboard = 'osc52'
+end

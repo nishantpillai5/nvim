@@ -230,6 +230,94 @@ Claude terminal is left and nothing is unsaved).
 The `llama_hl_fim_hint` highlight lives in `plugins/llama.lua` rather than
 core, since it only matters when llama.vim is enabled.
 
+## Containers
+
+Two unrelated things, both from the old config:
+
+- **`Dockerfile` + `docker-compose.yml`** build a throwaway Arch box that *runs*
+  this config, for trying a change against a clean machine:
+  `docker compose run --rm nvim`. The repo is bind-mounted at
+  `~/.config/nvim`, so `nvim` in the container is this config, live from the
+  host -- `lazy-lock.json` included, so a plugin update inside is a change you
+  can commit outside. `~/.local` is a named volume, so plugin clones, mason
+  binaries and treesitter parsers survive between runs, and `$HOME/notes` is
+  bind-mounted at DIR_NOTES.
+- **`.devcontainer.json`** is for working *on* the config with Claude Code behind
+  the firewall feature. Its image carries node and the CLI, not neovim.
+  `postCreateCommand` symlinks the workspace to `~/.config/nvim`, which is where
+  `DIR_NVIM`, the `<leader>ii` source maps and `enabled.lua`'s loader all expect
+  to find it.
+
+`.dockerignore` keeps `.git`, `.env`, `.claude` and the container files
+themselves out of the build context; the config itself has to be in it, since the
+image warms up against it.
+
+What changed on the way over:
+
+- **The neovim version is asserted at build time.** Arch is rolling, so the
+  neovim it ships moves, and this config's 0.12 APIs fail one `require` at a
+  time rather than up front. The build runs `has('nvim-0.12')` and `cquit 1`s if
+  it is older.
+- **The user is created before anything lands in its home.** The old Dockerfile
+  built the python venv first and then `useradd`d over the top, leaving the venv
+  root-owned inside the user's own home.
+- **luarocks is gone**, along with `lua51`, the `.luarocks/config-5.1.lua` and
+  the `lazy-rocks` directory. `core/lazy.lua` sets `rocks = { enabled = false }`.
+- **`tree-sitter-cli` earns its place now.** nvim-treesitter's `main` branch
+  builds every parser in `util/parsers.lua` from source, so it and a compiler are
+  load-bearing rather than leftovers.
+- **`git-delta` added**, since telescope's diff previewer uses it when it is on
+  PATH. **`yarn`, `ruby` and `imagemagick` dropped** -- they were there for
+  markdown-preview's build step and image.nvim, neither of which came over.
+  `pacman -Scc` would have taken the sync database with the package cache, so the
+  cleanup is `rm -rf /var/cache/pacman/pkg/*` instead.
+- **`$HOME/notes` is mounted**, which it was not before: obsidian's `event`
+  never fires without the directory, and calendar and global-note both read it.
+
+### Warm image
+
+The last four layers install everything a first run used to: `Lazy! install`
+then `Lazy! restore` (the second pins every plugin to `lazy-lock.json` rather
+than whatever HEAD happens to be), the parsers, and `:MasonInstallAll`. All of
+them block without a UI, and mason `1cq`s on an unknown package name -- so a typo
+in `core/lsp.lua`'s `MASON_PACKAGES` fails the build rather than the editor.
+
+- **The parser list moved to `lua/util/parsers.lua`.** `plugins/treesitter.lua`
+  requires it, and so does the build, which calls
+  `install(require 'util.parsers'):wait(...)` -- the config's own call is async
+  and would be cut off when headless nvim exits. One list, two callers.
+- **How the warm-up reaches runtime**: all three write under `~/.local`, and
+  Docker seeds a *new* named volume from whatever the image has at that path. An
+  existing volume keeps its own contents, so pick the baked ones up once with
+  `docker volume rm nvim_nvim-local`.
+- **The COPY is the last cache boundary on purpose.** Editing the config
+  invalidates it, so a rebuild redoes the warm-up but not the pacman layers. You
+  do not normally rebuild -- the bind mount is live -- only when plugins change.
+
+### Claude, clipboard, uid
+
+- **`claude` is installed** (`npm install -g @anthropic-ai/claude-code`), so
+  `plugins/claudecode.lua` has something to talk to. Credentials are not baked:
+  `~/.claude` is a named volume so `claude login` survives, and
+  `ANTHROPIC_API_KEY` is passed through when it is set in the host environment.
+  A volume rather than a bind of the real `~/.claude` -- the same call
+  `.devcontainer.json` makes.
+- **The `"+` maps work through OSC 52.** A container has no display server, so
+  xclip would have nothing to talk to; compose sets `NVIM_CONTAINER`, and
+  `core/options.lua` turns that into `vim.g.clipboard = 'osc52'`, which hands the
+  yank to the host's terminal. Copy is widely supported, paste needs the terminal
+  to answer the query and often does not -- so `<leader>y` lands and `<leader>p`
+  may not.
+- **uid is a build arg.** `UID`/`GID` default to 1000, which is what macOS wants
+  (Docker Desktop ignores ownership, and real macOS ids would fail the build --
+  GID 20 is `staff` there and `dialout` on Arch). On Linux, once:
+
+  ```sh
+  printf 'UID=%s\nGID=%s\n' "$(id -u)" "$(id -g)" > .env
+  ```
+
+  compose reads `.env` on its own, and `.gitignore` keeps it out of the repo.
+
 ## Porting more from the old config
 
 This config lives at `~/.config/nvim`, so plain `nvim` runs it. The config it
@@ -350,8 +438,9 @@ Diffed directly, so this does not need re-checking:
 - **env.** `DIR_LEET`, `VSC_CONFIG`, `GLOBAL_STATUS`, `PANEL_POSITION`,
   `PRESENTING`, `SCREEN` and `SIDEBAR_POSITION` are not in `util/env.lua`.
 
-Not carried over at the repo level, deliberately: `Dockerfile`,
-`docker-compose.yml`, `scripts/`, `sounds/`, `vscode_config/`, and `lua/vsc/`.
+Not carried over at the repo level, deliberately: `scripts/`, `sounds/`,
+`vscode_config/`, and `lua/vsc/`. `Dockerfile`, `docker-compose.yml`,
+`.dockerignore` and `.devcontainer.json` are ported -- see Containers, above.
 
 ### Translating a spec
 

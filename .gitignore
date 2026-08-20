@@ -1,0 +1,6 @@
+CLAUDE.local.md
+.DS_Store
+# Host uid/gid for docker-compose.yml's build args.
+.env
+# Neovim falls back to writing here when its state dir is not writable.
+nvim.log
