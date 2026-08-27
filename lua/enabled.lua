@@ -85,13 +85,15 @@ return {
 
   -- Notes ---------------------------------------------------------------------
   'obsidian-nvim/obsidian.nvim',
+  'iamcco/markdown-preview.nvim',
   'backdround/global-note.nvim',
   'mattn/calendar-vim',
 
   -- AI ------------------------------------------------------------------------
   'ggml-org/llama.vim',
   'coder/claudecode.nvim',
-  'olimorris/codecompanion.nvim',
+  -- 'olimorris/codecompanion.nvim',
+  'rauls-kjarners/omp.nvim',
 
   -- Git -----------------------------------------------------------------------
   'tpope/vim-fugitive',

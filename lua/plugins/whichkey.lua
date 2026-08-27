@@ -7,7 +7,7 @@ return {
     opts = function()
       return {
         icons = { rules = false, group = '' },
-        sort = { 'local', 'order', 'alphanum', 'mod', 'lower', 'icase' },
+        sort = { 'order', 'alphanum', 'mod', 'lower', 'icase' },
         -- Windows terminals mis-handle which-key's automatic triggers.
         triggers = require('util.env').OS == 'windows' and {
           { '<auto>', mode = 'nixsotc' },
@@ -16,7 +16,7 @@ return {
         spec = {
           { '<leader>', group = 'Leader' },
           { '<leader>a', group = 'Agent', mode = { 'n', 'v' } },
-          { '<leader>c', group = 'Chat', mode = { 'n', 'v' } },
+          { '<leader>c', group = 'OMP', mode = { 'n', 'v' } },
           { '<leader>e', group = 'Explorer' },
           { '<leader>f', group = 'Find' },
           { '<leader>fg', group = 'Git' },
@@ -70,6 +70,52 @@ return {
           { '[', group = 'Prev' },
         },
       }
+    end,
+    config = function(_, opts)
+      require('which-key').setup(opts)
+
+      -- Colour buffer-local descriptions instead. which-key has no hook for it:
+      -- the highlight comes from `item.group` alone, and by render time a cell is
+      -- a bare padded string. So remember each local item's key/description pair
+      -- and recolour it on the way out -- rows go key, separator, icon, desc.
+      local locals = {}
+
+      local view = require 'which-key.view'
+      local item = view.item
+      view.item = function(node, o)
+        local ret = item(node, o)
+        if node.keymap and (node.keymap.buffer or 0) ~= 0 then
+          locals[ret.key .. '\0' .. ret.desc] = true
+        end
+        return ret
+      end
+
+      local text = require 'which-key.text'
+      local append = text.append
+      local key -- the key cell of the row being appended
+      text.append = function(self, str, o)
+        local hl = type(o) == 'string' and o or type(o) == 'table' and o.hl
+        if type(str) == 'string' then
+          if hl == 'WhichKey' then
+            key = vim.trim(str)
+          elseif hl == 'WhichKeyDesc' and locals[(key or '') .. '\0' .. vim.trim(str)] then
+            return append(self, str, 'WhichKeyLocal')
+          end
+        end
+        return append(self, str, o)
+      end
+
+      -- Re-set on colorscheme, which clears it.
+      local function set_hl()
+        vim.api.nvim_set_hl(0, 'WhichKeyLocal', { fg = require('vscode.colors').get_colors().vscBlueGreen })
+      end
+
+      set_hl()
+      vim.api.nvim_create_autocmd('ColorScheme', {
+        group = vim.api.nvim_create_augroup('whichkey_local_hl', { clear = true }),
+        desc = 'keep buffer-local which-key descriptions coloured',
+        callback = set_hl,
+      })
     end,
   },
 }

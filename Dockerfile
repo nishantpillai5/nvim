@@ -12,9 +12,6 @@ FROM archlinux:base
 # branch builds every parser in util/parsers.lua from source. git-delta is what
 # telescope's diff previewer uses when it is on PATH, and npm/pip/go/cargo are
 # what :MasonInstallAll builds its packages with.
-#
-# Dropped from the old list: yarn (markdown-preview's build step), ruby and
-# imagemagick (image.nvim) -- none of those plugins came over.
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
       base-devel \

@@ -130,8 +130,8 @@ git-worktree.nvim on its own, since its config is substantial.
 
 The vault is `util.env`'s `DIR_NOTES` (`~/notes` unless the environment says
 otherwise). `plugins/obsidian.lua` loads for markdown files under it, or on the
-first `<leader>n` mapping, and `plugins/calendar.lua` and
-`plugins/global_note.lua` sit beside it.
+first `<leader>n` mapping, and `plugins/calendar.lua`,
+`plugins/global_note.lua` and `plugins/markdown_preview.lua` sit beside it.
 
 - **With the vault as cwd, four general finders become obsidian's**:
   `<leader>ff`, `<leader>?`, `<leader>fs` and `<leader>fS` are re-bound in
@@ -148,6 +148,18 @@ first `<leader>n` mapping, and `plugins/calendar.lua` and
 - **The calendar tracks the journal.** Opening `journal/*.md` in the vault pops
   the month beside it; a day in the calendar opens that day's note, and days that
   already have one are marked. edgy docks it left by its `calendar` filetype.
+- **markdown-preview is `<leader>zP`, not the old `<leader>zp`.** `<leader>zp` is
+  the Pomodoro prefix here, and a buffer-local `<leader>zp` completes on its own,
+  so the old binding swallowed `<leader>zp*` in every markdown buffer -- i.e. in
+  the whole vault. The mapping is still buffer-local to markdown; `:MarkdownPreview`
+  and friends work anywhere. `MarkdownPreviewToggleTheme` is this config's command
+  rather than the plugin's, as it was before -- it flips `g:mkdp_theme` (`dark` at
+  startup) and re-opens the page, since the theme is read as the page opens.
+- **The preview server is a prebuilt binary.** The spec's `build` calls
+  `mkdp#util#install_sync`, which downloads the release binary, in place of the old
+  `cd app && yarn install`: no yarn or node, and it blocks, so the Dockerfile's
+  headless `Lazy! install` actually completes it. The async `mkdp#util#install`
+  opens a terminal window and returns, which headless Neovim would cut off.
 - **global-note's three scratch notes** all live in the vault: `<leader>na`
   global, `<leader>nN` per project (`project.<dir>.md`), `<leader>nn` per branch
   (`project.<dir>.<branch>.md`, non-word characters replaced). `util.git.branch()`
@@ -267,8 +279,9 @@ What changed on the way over:
   builds every parser in `util/parsers.lua` from source, so it and a compiler are
   load-bearing rather than leftovers.
 - **`git-delta` added**, since telescope's diff previewer uses it when it is on
-  PATH. **`yarn`, `ruby` and `imagemagick` dropped** -- they were there for
-  markdown-preview's build step and image.nvim, neither of which came over.
+  PATH. **`yarn`, `ruby` and `imagemagick` dropped** -- yarn built
+  markdown-preview's server, which now arrives as a prebuilt binary over curl,
+  and ruby and imagemagick were image.nvim's, which did not come over.
   `pacman -Scc` would have taken the sync database with the package cache, so the
   cleanup is `rm -rf /var/cache/pacman/pkg/*` instead.
 - **`$HOME/notes` is mounted**, which it was not before: obsidian's `event`
@@ -349,7 +362,7 @@ comm -13 \
 
 Lists every plugin the old config actually loaded that this config does not
 enable. The `grep -v` drops the entries commented out in the old manifests --
-without it the count is 57 rather than 38, since those entries are still text in
+without it the count is 56 rather than 37, since those entries are still text in
 the manifest range. One caveat remains: a plugin ported under a fork shows up as
 missing (the old manifest says `folke/todo-comments.nvim`, we run
 `nishantpillai5/todo-comments.nvim`).
@@ -359,7 +372,7 @@ copilot.lua, CopilotChat, coerce, jupytext, dap-python, eyeliner, outline,
 easypick, leetcode, competitest, marp, luarocks, hardtime, strudel, beepboop,
 presence, rest.nvim. Those are not gaps.
 
-#### The 38, grouped
+#### The 37, grouped
 
 The keymaps listed are what came off with the plugin.
 
@@ -386,12 +399,11 @@ buffer-local `s`, `<leader>s`, `<leader>p`).
 (`<leader>rr` `re` `rf` `rv` `ri` `rI` `rb` `rB`), `nvim-pack/nvim-spectre`
 (`<leader>r/` `r?` `rw`), `smjonas/inc-rename.nvim` (`<leader>rn`).
 
-**Notes** -- `iamcco/markdown-preview.nvim` (`<leader>zp`),
-`MeanderingProgrammer/render-markdown.nvim`, `nfrid/due.nvim`,
+**Notes** -- `MeanderingProgrammer/render-markdown.nvim`, `nfrid/due.nvim`,
 `Pocco81/HighStr.nvim` (`<leader>zh*` persistent highlights with export/import),
 `Avi-D-coder/whisper.nvim` (`<leader>ns` speech-to-text). obsidian.nvim,
-global-note.nvim and calendar-vim are ported -- see Notes and journal,
-above.
+global-note.nvim, calendar-vim and markdown-preview.nvim are ported -- see Notes
+and journal, above.
 
 **Notebooks and data science** -- `quarto-dev/quarto-nvim`,
 `benlubas/molten-nvim`, `jmbuhr/otter.nvim`, `3rd/image.nvim`,
@@ -527,3 +539,46 @@ Two things to watch when swapping:
 - `git_worktree.lua` already bypasses `vim.ui.input` with its own nui centered
   float, because dressing renders input at the cursor. So there are two input
   styles today. Picking one is arguably the more valuable half of this task.
+
+### Fill the which-key gaps
+
+Some mappings exist but which-key cannot advertise them, either because they
+only come into being when a plugin loads or attaches, or because whoever
+installed them left no `desc` to read. Found by snapshotting every global and
+buffer-local mapping at startup, force-loading all plugins, and diffing the
+result against the `spec` in `plugins/whichkey.lua`.
+
+Created on attach, so absent until then:
+
+- **gitsigns** installs `]c`, `[c`, `<leader>gh*`, `<leader>gRj`, `<leader>gV`
+  and `ih` in its `on_attach`, buffer-locally. In a tracked file they are all
+  there with descs; in the dashboard, a `:enew` buffer or any file outside a git
+  repo the `]` menu simply has no `c`. Only `<leader>gB` is a lazy `keys` stub.
+  Spec entries for `]c` / `[c` would advertise them everywhere, at the cost of
+  the label being a small lie in buffers where the key does nothing.
+- **LSP** maps `<leader>l*`, `<leader>r*` and `gr*` from `core/lsp.lua` on
+  `LspAttach`. Consequence: the `<leader>r` Refactor group declared in
+  `whichkey.lua` is an empty menu in every buffer without a server -- the
+  caveat the group list's own header comment describes.
+
+Installed by the plugin with no `desc`:
+
+- **calendar-vim** binds `<leader>cal` and `<leader>caL` (`<Plug>CalendarV` /
+  `CalendarH`) because `calendar.lua` sets `calendar_no_mappings = 0`. They show
+  as the raw `<Plug>` name, inside the `<leader>c` Chat group. Either give them
+  descs in the spec or flip the flag to `1` if the mappings are unwanted.
+- **mini.surround** adds next/prev variants beyond the six keys the spec names:
+  `<leader>Vdl`/`Vdn`, `Vfl`/`Vfn`, `VFl`/`VFn`, `Vhl`/`Vhn`, `Vrl`/`Vrn`. They
+  arrive with mini's own sentence-case descs ("Delete previous surrounding"),
+  which do not match the lowercase style used everywhere else here.
+- **vim-illuminate** maps `<M-i>` in operator-pending and visual with no desc.
+  Its `<M-n>` / `<M-p>` do have one.
+- **llama.vim** takes global normal-mode `<Tab>` and `<Esc>`
+  (`llama#inst_accept` / `inst_cancel`), undescribed. Worth knowing about for
+  the `<Esc>` grab as much as for which-key.
+- **fugitive**'s `y<C-G>` and **matchit**'s `%`, `[%`, `]%`, `g%`, `a%` are
+  undescribed too. Upstream, and cosmetic.
+
+Already handled, listed so they are not rediscovered: trailblazer's `m*` keys,
+`<leader>m`, and mini.surround's six base `<leader>V*` keys all get their labels
+from entries in the whichkey spec.

@@ -13,14 +13,14 @@ function M.filter_build_tasks(task)
   if _G.filter_build_tasks ~= nil then
     return _G.filter_build_tasks(task)
   end
-  return M.get_cmd(task):lower():find 'build' ~= nil
+  return true
 end
 
 function M.filter_run_tasks(task)
   if _G.filter_run_tasks ~= nil then
     return _G.filter_run_tasks(task)
   end
-  return M.get_cmd(task):lower():find 'run' ~= nil
+  return true
 end
 
 function M.task_formatter(task)
