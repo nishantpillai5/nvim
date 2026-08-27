@@ -70,6 +70,13 @@ return {
   'jemag/telescope-diff.nvim',
   'nishantpillai5/telescope-git-hunk',
 
+  -- Debugging and testing -----------------------------------------------------
+  'mfussenegger/nvim-dap',
+  'rcarriga/nvim-dap-ui',
+  'Weissle/persistent-breakpoints.nvim',
+  -- 'mfussenegger/nvim-dap-python',
+  'nvim-neotest/neotest',
+
   -- Terminal and tasks --------------------------------------------------------
   'akinsho/nvim-toggleterm.lua',
   'nishantpillai5/toggleterm-manager.nvim',

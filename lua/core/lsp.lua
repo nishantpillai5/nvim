@@ -33,6 +33,10 @@ local MASON_PACKAGES = {
   -- linters (plugins/lint.lua)
   'eslint_d',
   'cppcheck',
+  -- debug adapters (plugins/dap.lua): cpptools ships OpenDebugAD7 for the
+  -- cppdbg adapter, debugpy backs dap-python and neotest's <leader>id.
+  'cpptools',
+  'debugpy',
 }
 
 vim.diagnostic.config {

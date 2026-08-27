@@ -169,7 +169,7 @@ return {
     event = 'VeryLazy',
     dependencies = { 'nvim-tree/nvim-web-devicons' },
     opts = {
-      extensions = { 'overseer' },
+      extensions = { 'overseer', 'nvim-dap-ui' },
       options = {
         globalstatus = true,
         theme = 'vscode',

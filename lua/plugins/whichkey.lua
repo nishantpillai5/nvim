@@ -16,9 +16,11 @@ return {
         spec = {
           { '<leader>', group = 'Leader' },
           { '<leader>a', group = 'Agent', mode = { 'n', 'v' } },
+          { '<leader>b', group = 'Breakpoint' },
           { '<leader>c', group = 'OMP', mode = { 'n', 'v' } },
           { '<leader>e', group = 'Explorer' },
           { '<leader>f', group = 'Find' },
+          { '<leader>fb', group = 'Breakpoint' },
           { '<leader>fg', group = 'Git' },
           { '<leader>F', group = 'Find_Telescope' },
           { '<leader>g', group = 'Git', mode = { 'n', 'v' } },
@@ -31,7 +33,9 @@ return {
           { '<leader>gz', group = 'Stash' },
           { '<leader>h', group = 'Grapple' },
           { '<leader>ey', group = 'Yank' },
-          { '<leader>i', group = 'Config' },
+          -- Tests, plus the two buffer-local source_config mappings that only
+          -- exist under the config directory (core/keymaps.lua).
+          { '<leader>i', group = 'Test' },
           { '<leader>l', group = 'LSP', mode = { 'n', 'v' } },
           { '<leader>n', group = 'Notes', mode = { 'n', 'v' } },
           { '<leader>o', group = 'Tasks' },
