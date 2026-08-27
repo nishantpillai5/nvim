@@ -100,6 +100,16 @@ servers through nvim-lspconfig's old setup path.
   `plugins/whichkey.lua`, next to trailblazer's. mini installs its own mappings
   from `opts.mappings` when it loads, replacing lazy's key stubs and their
   `desc`, so the spec's `keys` labels only ever show before the first use.
+- `lua/plugins/snacks.lua` provides `vim.ui.input` and `vim.ui.select`, which
+  dressing.nvim used to. dressing is archived upstream and snacks was already on
+  disk as claudecode's terminal provider, so replacing it enabled two snacks
+  modules rather than adding a plugin. Only `input` and `picker` are on --
+  telescope is still the finder behind every mapping, and `picker` is here for
+  `vim.ui.select` alone. Two things the swap changed: `overseer.lua`'s bundle
+  pickers no longer pass `telescope = require('telescope.themes').get_cursor()`,
+  a per-call option only dressing read; and `git_worktree.lua` dropped its own
+  nui centered float for the create prompt, because snacks.input floats
+  centered where dressing rendered at the cursor. There is one input style now.
 
 ## Finder
 
@@ -504,41 +514,6 @@ EOF
   icon-plus-name on a widescreen context.
 
 ## Future tasks
-
-### Replace dressing.nvim, and settle on one input style
-
-`dressing.nvim` is archived upstream. It is not broken -- it is a small, stable
-shim over `vim.ui.select` and `vim.ui.input` -- so this is not urgent. Do it if
-dressing breaks on a future Neovim, or when consolidating the input UI.
-
-What depends on it today:
-
-- `vim.ui.input` in `fugitive.lua` (branch name, two stash messages) and as the
-  fallback in `git_worktree.lua`.
-- `vim.ui.select` in `grapple.lua` (scope), `overseer.lua` (bundles) and
-  `git_worktree.lua` (delete).
-- overseer calls `vim.ui.select` internally in four of its own modules
-  (`action_util`, `task_editor`, `task_bundle`, `commands`), so every
-  `<leader>of` task action goes through it. This is why `overseer.lua` declares
-  dressing as a dependency.
-
-**Not** snacks.picker, despite snacks already being on disk. snacks is here only
-as claudecode's terminal provider, and enabling its picker would put a second
-picker UI next to telescope, which this config uses for everything. Prefer:
-
-- `nvim-telescope/telescope-ui-select.nvim` for `vim.ui.select`, so those prompts
-  match the picker used everywhere else.
-- `snacks.input`, or plain native input, for `vim.ui.input`.
-
-Two things to watch when swapping:
-
-- `overseer.lua`'s bundle pickers pass `telescope = require('telescope.themes').get_cursor()`.
-  Only dressing reads a per-call `opts.telescope` (`dressing/select/telescope.lua:141`);
-  with telescope-ui-select the theme is configured once in the extension's opts
-  instead.
-- `git_worktree.lua` already bypasses `vim.ui.input` with its own nui centered
-  float, because dressing renders input at the cursor. So there are two input
-  styles today. Picking one is arguably the more valuable half of this task.
 
 ### Fill the which-key gaps
 

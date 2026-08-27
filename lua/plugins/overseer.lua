@@ -50,7 +50,6 @@ local function select_bundle(prompt, command)
     local overseer = require 'overseer'
     vim.ui.select(overseer.list_task_bundles(), {
       prompt = prompt,
-      telescope = require('telescope.themes').get_cursor(),
     }, function(selected)
       if selected then
         vim.cmd(command .. ' ' .. selected)
@@ -67,7 +66,7 @@ return {
     dependencies = {
       'akinsho/nvim-toggleterm.lua',
       'nvim-telescope/telescope.nvim',
-      'stevearc/dressing.nvim',
+      'folke/snacks.nvim',
     },
     cmd = {
       'OverseerList',

@@ -67,40 +67,6 @@ local function main_worktree(cwd)
   return (path and not bare) and path or nil
 end
 
--- Centered single-line input. The global vim.ui.input provider renders at the
--- cursor; this floats in the middle of the editor instead.
-local function centered_input(opts, on_submit)
-  local ok, Input = pcall(require, 'nui.input')
-  if not ok then
-    return vim.ui.input(opts, on_submit)
-  end
-  local event = require('nui.utils.autocmd').event
-  local title = (opts.prompt or 'Input'):gsub('%s*:%s*$', '')
-  local input = Input({
-    relative = 'editor',
-    position = '50%',
-    size = { width = math.min(60, vim.o.columns - 8) },
-    border = {
-      style = 'rounded',
-      text = { top = ' ' .. title .. ' ', top_align = 'center' },
-    },
-    win_options = { winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder' },
-  }, {
-    default_value = opts.default or '',
-    on_submit = on_submit,
-  })
-  input:mount()
-  input:map('n', '<Esc>', function()
-    input:unmount()
-  end, { noremap = true })
-  input:map('i', '<C-c>', function()
-    input:unmount()
-  end, { noremap = true })
-  input:on(event.BufLeave, function()
-    input:unmount()
-  end)
-end
-
 -- Set by the CREATE hook so the create-triggered SWITCH can stay put.
 local stay_after_create = nil
 
@@ -110,7 +76,7 @@ end
 
 local function create_worktree()
   local root = worktree_root()
-  centered_input({ prompt = 'New worktree name: ' }, function(name)
+  vim.ui.input({ prompt = 'New worktree name: ' }, function(name)
     name = name and vim.trim(name)
     if not name or name == '' then
       return

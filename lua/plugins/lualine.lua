@@ -55,6 +55,33 @@ local function worktree()
   return name and (' ' .. name) or ''
 end
 
+-- Branch of the cwd's repository, read straight from HEAD. lualine's own
+-- `branch` component resolves the repo by walking up from the *buffer's* path,
+-- which resolves nothing for a pseudo-path like `fugitive:///repo/.git//`: it
+-- then blanks the branch it had cached, so the statusline loses the branch the
+-- moment a fugitive window opens. This is the fallback for that.
+local function cwd_branch()
+  local root = vim.fs.root(vim.uv.cwd(), '.git')
+  if not root then
+    return ''
+  end
+
+  local gitdir = vim.fs.joinpath(root, '.git')
+  local stat = vim.uv.fs_stat(gitdir)
+  if stat and stat.type == 'file' then
+    -- Linked worktree or submodule: `.git` points at the real git dir.
+    local target = (vim.fn.readfile(gitdir, '', 1)[1] or ''):match 'gitdir: (.+)$'
+    if not target then
+      return ''
+    end
+    gitdir = vim.fs.normalize(vim.startswith(target, '/') and target or vim.fs.joinpath(root, target))
+  end
+
+  local head = vim.fn.readfile(vim.fs.joinpath(gitdir, 'HEAD'), '', 1)[1] or ''
+  -- Detached HEAD falls back to a short sha, the same width lualine uses.
+  return head:match 'ref: refs/heads/(.+)$' or head:sub(1, 6)
+end
+
 -- Attached LSP clients, as icons. Was lsp_zero.lua's lualine injection.
 local function lsp_clients()
   local clients = vim.lsp.get_clients { bufnr = 0 }
@@ -158,7 +185,16 @@ return {
         lualine_a = { 'mode', 'selectioncount' },
         lualine_b = { cwd },
         lualine_c = {
-          'branch',
+          -- lualine's own component, with cwd_branch() covering the cases where
+          -- its per-buffer resolution comes up empty: fugitive:// and other
+          -- pseudo-path buffers, and the per-buffer cache misses that
+          -- ignore_focus causes in pickers, the dashboard and the quickfix list.
+          {
+            'branch',
+            fmt = function(name)
+              return name ~= '' and name or require('lualine.utils.utils').stl_escape(cwd_branch())
+            end,
+          },
           worktree,
           -- Was gitblame.lua's own lualine.setup call, gated on the dropped
           -- SCREEN=='widescreen' knob. The cond keeps it out of the way when
