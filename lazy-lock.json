@@ -74,6 +74,7 @@
   "schemastore.nvim": { "branch": "main", "commit": "cef8d093b63c9be7e8b49f7dc341e8447fc4c300" },
   "screenkey.nvim": { "branch": "main", "commit": "16390931d847b1d5d77098daccac4e55654ac9e2" },
   "snacks.nvim": { "branch": "main", "commit": "882c996cf28183f4d63640de0b4c02ec886d01f2" },
+  "strudel.nvim": { "branch": "main", "commit": "3a7e62c9048a318281328ad08d6269e50b884cd3" },
   "telescope-color-names.nvim": { "branch": "main", "commit": "95b372b9a8ba0fc7cf6a67be637ee37453f322da" },
   "telescope-dap.nvim": { "branch": "master", "commit": "783366bd6c1e7fa0a5c59c07db37f49c805a28df" },
   "telescope-diff.nvim": { "branch": "master", "commit": "f85d15eddb4dee7fb44beaa42d54afe8f00cf1f0" },
@@ -98,6 +99,7 @@
   "volt": { "branch": "main", "commit": "620de1321f275ec9d80028c68d1b88b409c0c8b1" },
   "vscode.nvim": { "branch": "main", "commit": "aa1102a7e15195c9cca22730b09224a7f7745ba8" },
   "which-key.nvim": { "branch": "main", "commit": "3aab2147e74890957785941f0c1ad87d0a44c15a" },
+  "whisper.nvim": { "branch": "master", "commit": "43b9317c35d33cecb89cad6b9f581f136f26a22d" },
   "wrapped.nvim": { "branch": "master", "commit": "1f22d80f85113667efce93df84419dc63eabad48" },
   "yanky.nvim": { "branch": "main", "commit": "dd6689fdda85f66cab7d9b1a1664625f3be0920d" },
   "zen-mode.nvim": { "branch": "main", "commit": "8564ce6d29ec7554eb9df578efa882d33b3c23a7" }

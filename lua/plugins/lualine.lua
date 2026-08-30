@@ -163,6 +163,28 @@ local function task_status()
   return last_run_text() .. last_build_text()
 end
 
+-- Whether Claude's prompt box will dictate (<leader>ad, plugins/whisper.lua),
+-- and what a live session is doing. nil flag = whisper not in this config.
+local MIC, MIC_OFF = '󰍬', '󰍭'
+
+local function dictation()
+  if vim.g.whisper_auto_dictate == nil then
+    return ''
+  elseif not vim.g.whisper_auto_dictate then
+    return MIC_OFF
+  end
+  if package.loaded['whisper'] then
+    local state = require 'whisper.state'
+    if state.is_recording() and not state.is_model_loaded() then
+      return MIC .. ' Loading'
+    elseif vim.g.whisper_dictating then
+      return state.is_processing() and (MIC .. ' Processing') or (MIC .. ' Recording')
+    end
+  end
+  -- Armed: model resident, waiting for a prompt box.
+  return MIC
+end
+
 return {
   {
     'nvim-lualine/lualine.nvim',
@@ -222,7 +244,6 @@ return {
         lualine_z = { 'progress', 'location' },
       },
       tabline = {
-        -- Was grapple.lua's own lualine.setup call.
         lualine_a = { { 'grapple' } },
         lualine_b = {
           {
@@ -252,7 +273,6 @@ return {
         },
         lualine_y = {
           'searchcount',
-          -- Was pomodoro.lua's own lualine.setup call.
           {
             function()
               return '󰄉 ' .. tostring(require('pomo').get_first_to_finish())
@@ -264,7 +284,6 @@ return {
           },
           task_status,
           { 'overseer' },
-          -- Was noice.lua's lualine injection.
           {
             function()
               return require('noice').api.statusline.command.get()
@@ -276,7 +295,6 @@ return {
           },
         },
         lualine_z = {
-          -- Was neoscopes.lua's own lualine.setup call.
           {
             function()
               return require('util.scope').status()
@@ -285,6 +303,7 @@ return {
               return package.loaded['neoscopes'] ~= nil
             end,
           },
+          dictation,
         },
       },
     },

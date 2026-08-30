@@ -15,6 +15,7 @@ return {
         } or nil,
         spec = {
           { '<leader>', group = 'Leader' },
+          { '<leader>;', group = 'Strudel' },
           { '<leader>a', group = 'Agent', mode = { 'n', 'v' } },
           { '<leader>b', group = 'Breakpoint' },
           { '<leader>c', group = 'OMP', mode = { 'n', 'v' } },

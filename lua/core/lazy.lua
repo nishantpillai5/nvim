@@ -63,12 +63,14 @@ if #missing > 0 then
   end)
 end
 
-require('lazy').setup {
-  spec = spec,
+-- Spec first, options second: with a single table lazy still reads it as the
+-- options (it checks for a `spec` field), but lua_ls resolves that call against
+-- LazySpec, where `dev` is the per-plugin boolean rather than this table.
+require('lazy').setup(spec, {
   -- Plugins checked out locally are picked up from here via `dev = true`.
   dev = { path = require('util.env').NVIM_PLUGINS },
   change_detection = { notify = false },
   -- luarocks integration is off; nothing here needs it, and leaving it on warns
   -- on every start when luarocks isn't installed.
   rocks = { enabled = false },
-}
+})

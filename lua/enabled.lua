@@ -95,6 +95,7 @@ return {
   'iamcco/markdown-preview.nvim',
   'backdround/global-note.nvim',
   'mattn/calendar-vim',
+  'Avi-D-coder/whisper.nvim',
 
   -- AI ------------------------------------------------------------------------
   'ggml-org/llama.vim',
@@ -118,6 +119,7 @@ return {
   'NStefan002/screenkey.nvim',
   'aikhe/wrapped.nvim',
   'kwakzalver/duckytype.nvim',
+  'gruvw/strudel.nvim',
   'eandrju/cellular-automaton.nvim',
   'seandewar/killersheep.nvim',
 }

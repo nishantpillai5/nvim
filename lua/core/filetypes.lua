@@ -5,6 +5,8 @@ vim.filetype.add {
   extension = {
     -- Comments are common in json config files; jsonc tolerates them.
     json = 'jsonc',
-    str = 'javascript', -- strudel
+    -- strudel; the plugin sets these too, this way they hold without it.
+    str = 'javascript',
+    std = 'javascript',
   },
 }
