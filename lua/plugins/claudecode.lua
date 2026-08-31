@@ -296,7 +296,8 @@ local function prompt_complete()
 
   -- /command: only when the line is just a leading slash token.
   if before:match '^%s*/%S*$' then
-    local start = before:find '/%S*$'
+    -- The match above guarantees a slash token, so find cannot come back nil.
+    local start = assert(before:find '/%S*$')
     local items = {}
     for _, name in ipairs(slash_command_names()) do
       items[#items + 1] = { word = '/' .. name, kind = 'f' }
@@ -587,10 +588,12 @@ local function open_prompt_input()
   -- Preview Claude's suggested reply as greyed ghost text while the box is empty.
   local function render_ghost()
     vim.api.nvim_buf_clear_namespace(buf, ghost_ns, 0, -1)
-    if not (suggestion and buffer_is_empty()) then
+    -- Guarding on the split rather than on `suggestion` -- the two are set
+    -- together, and this is the one that gets indexed below.
+    local slines = suggestion_lines
+    if not (slines and buffer_is_empty()) then
       return
     end
-    local slines = suggestion_lines
     local ext = { virt_text = { { slines[1], 'Comment' } }, virt_text_pos = 'inline', hl_mode = 'combine' }
     if #slines > 1 then
       ext.virt_lines = {}
@@ -672,11 +675,11 @@ local function open_prompt_input()
 
   -- Replace the empty prompt with Claude's suggested reply, cursor at its end.
   local function accept_suggestion()
-    if not (suggestion and buffer_is_empty()) then
+    local slines = suggestion_lines
+    if not (slines and buffer_is_empty()) then
       return false
     end
     vim.api.nvim_buf_clear_namespace(buf, ghost_ns, 0, -1)
-    local slines = suggestion_lines
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, slines)
     vim.api.nvim_win_set_cursor(win, { #slines, #slines[#slines] })
     fit_height()
@@ -1085,7 +1088,8 @@ ensure_terminal_autoscroll = function()
   if autoscroll_timer then
     return
   end
-  autoscroll_timer = vim.uv.new_timer()
+  -- Only ever nil if the process is out of file descriptors.
+  autoscroll_timer = assert(vim.uv.new_timer())
   autoscroll_timer:start(
     250,
     250,
@@ -1241,6 +1245,9 @@ return {
     },
     config = function()
       require('claudecode').setup {
+        -- Every field of ClaudeCodeTerminalConfig is annotated as required; the
+        -- plugin merges what you pass over its own defaults.
+        ---@diagnostic disable-next-line: missing-fields
         terminal = {
           split_width_percentage = 0.45,
         },

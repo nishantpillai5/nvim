@@ -90,7 +90,7 @@ return {
 
       -- overseer's own opts set `dap = false`, so it is patched here instead --
       -- that routes preLaunchTask/postDebugTask through overseer.
-      require('overseer').patch_dap(true)
+      require('overseer').enable_dap(true)
 
       require('nvim-dap-virtual-text').setup {
         only_first_definition = false,

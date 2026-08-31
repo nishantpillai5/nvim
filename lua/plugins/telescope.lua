@@ -183,7 +183,7 @@ local function changed_files_from(ref, include_untracked)
         end, { desc = 'include_untracked_files' })
         return true
       end,
-    })
+    }, {})
     :find()
 end
 

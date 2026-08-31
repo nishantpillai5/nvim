@@ -4,6 +4,10 @@ return {
     event = 'BufReadPre',
     config = function()
       local c = require('vscode.colors').get_colors()
+      -- scrollbar/init.lua requires scrollbar.utils and scrollbar.handlers,
+      -- which require it back, so lua_ls resolves the module through the cycle
+      -- to an `M` that has no fields on it yet. `setup` is there at runtime.
+      ---@diagnostic disable-next-line: undefined-field
       require('scrollbar').setup {
         handle = { color = c.vscPopupHighlightGray },
         marks = {

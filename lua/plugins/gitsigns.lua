@@ -38,14 +38,15 @@ return {
           gs.reset_hunk { vim.fn.line '.', vim.fn.line 'v' }
         end, 'reset')
         map('n', '<leader>ghS', gs.stage_buffer, 'stage_buffer')
-        map('n', '<leader>ghu', gs.undo_stage_hunk, 'undo_stage')
+        -- Staging is a toggle now: on a staged sign this unstages the hunk.
+        map('n', '<leader>ghu', gs.stage_hunk, 'unstage')
         map('n', '<leader>ghR', gs.reset_buffer, 'reset_buffer')
         map('n', '<leader>gRj', gs.reset_buffer, 'reset_file')
         map('n', '<leader>ghd', gs.preview_hunk, 'diff')
         map('n', '<leader>ghb', function()
           gs.blame_line { full = true }
         end, 'blame')
-        map('n', '<leader>gV', gs.toggle_deleted, 'virtual_deleted')
+        map('n', '<leader>gV', gs.preview_hunk_inline, 'inline_diff')
         map({ 'o', 'x' }, 'ih', ':<C-U>Gitsigns select_hunk<CR>', 'select_hunk')
 
         -- Feed hunk marks to the scrollbar.

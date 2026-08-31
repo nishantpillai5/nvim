@@ -61,7 +61,7 @@ end
 -- then blanks the branch it had cached, so the statusline loses the branch the
 -- moment a fugitive window opens. This is the fallback for that.
 local function cwd_branch()
-  local root = vim.fs.root(vim.uv.cwd(), '.git')
+  local root = vim.fs.root(assert(vim.uv.cwd()), '.git')
   if not root then
     return ''
   end
@@ -285,12 +285,16 @@ return {
           task_status,
           { 'overseer' },
           {
+            -- NoiceStatus declares its ---@class on a `return` statement, so
+            -- lua_ls registers the class name but none of its fields.
             function()
-              return require('noice').api.statusline.command.get()
+              ---@diagnostic disable-next-line: undefined-field
+              return require('noice').api.status.command.get()
             end,
             cond = function()
               local ok, noice = pcall(require, 'noice')
-              return ok and noice.api.statusline.command.has()
+              ---@diagnostic disable-next-line: undefined-field
+              return ok and noice.api.status.command.has()
             end,
           },
         },

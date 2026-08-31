@@ -87,6 +87,7 @@ return {
 
       local view = require 'which-key.view'
       local item = view.item
+      ---@diagnostic disable-next-line: duplicate-set-field
       view.item = function(node, o)
         local ret = item(node, o)
         if node.keymap and (node.keymap.buffer or 0) ~= 0 then

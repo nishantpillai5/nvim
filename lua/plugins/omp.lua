@@ -33,7 +33,9 @@ local esc_timer = nil
 -- <Esc> goes through to OMP and a second one within ESC_TIMEOUT leaves terminal
 -- mode instead.
 local function double_esc()
-  esc_timer = esc_timer or vim.uv.new_timer()
+  -- Only ever nil if the process is out of file descriptors, in which case
+  -- there is nothing sensible to fall back to.
+  esc_timer = esc_timer or assert(vim.uv.new_timer())
   if esc_timer:is_active() then
     esc_timer:stop()
     return [[<C-\><C-n>]]
@@ -72,21 +74,25 @@ local function new(cmd)
   }
 end
 
--- Whether the terminal buffer is still around. toggleterm re-spawns the job on
--- the next open once it is gone, which is fine -- but the prompt below has to
--- know whether there is a live session to write to.
+-- The terminal if its buffer is still around, otherwise nil. toggleterm
+-- re-spawns the job on the next open once the buffer is gone, which is fine --
+-- but the prompt below has to know whether there is a live session to write to.
+-- Handing back the terminal rather than a boolean is what lets each caller work
+-- through a handle it knows is non-nil.
 local function alive()
-  return term ~= nil and term.bufnr ~= nil and vim.api.nvim_buf_is_valid(term.bufnr)
+  if term ~= nil and term.bufnr ~= nil and vim.api.nvim_buf_is_valid(term.bufnr) then
+    return term
+  end
 end
 
 -- Open the panel without taking focus: you are normally still typing in the file
 -- the bridge is telling OMP about.
-local function show()
-  if term:is_open() then
+local function show(t)
+  if t:is_open() then
     return
   end
   local origin = vim.api.nvim_get_current_win()
-  term:open(size())
+  t:open(size())
   vim.cmd 'stopinsert'
   vim.schedule(function()
     if vim.api.nvim_win_is_valid(origin) and vim.api.nvim_get_current_win() ~= origin then
@@ -110,7 +116,7 @@ local function start(args, focus)
   if focus then
     term:open(size()) -- for --resume, whose session picker is inside the TUI
   else
-    show()
+    show(term)
   end
   -- The flags have reached the argv now. Drop them, so a respawn -- the panel
   -- reopened after omp exited, or after the buffer was wiped -- starts a plain
@@ -119,13 +125,14 @@ local function start(args, focus)
 end
 
 local function toggle()
-  if not alive() then
+  local t = alive()
+  if not t then
     return start()
   end
-  if term:is_open() then
-    term:close()
+  if t:is_open() then
+    t:close()
   else
-    show()
+    show(t)
   end
 end
 
@@ -135,11 +142,12 @@ end
 -- on a channel whose job has exited, and with close_on_exit off the buffer
 -- outlives the process.
 local function send_raw(keys)
-  if not alive() then
+  local t = alive()
+  if not t then
     vim.notify('No OMP terminal running', vim.log.levels.WARN)
     return false
   end
-  local ok, written = pcall(vim.fn.chansend, term.job_id, keys)
+  local ok, written = pcall(vim.fn.chansend, t.job_id, keys)
   if not ok or written == 0 then
     vim.notify('OMP terminal channel is closed', vim.log.levels.WARN)
     return false
@@ -160,8 +168,9 @@ local function prompt()
     return
   end
   -- A running TUI reads the line off its pty; CR submits it, "\n" does not.
-  if alive() and send_raw(text .. '\r') then
-    show()
+  local t = alive()
+  if t and send_raw(text .. '\r') then
+    show(t)
   else
     -- Nothing to write to: hand the text to omp as its opening message instead
     -- of racing the TUI's startup with a write it is not yet reading.

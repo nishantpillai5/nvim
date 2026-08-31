@@ -188,12 +188,14 @@ return {
 
       local audio = require 'whisper.audio'
       local filter_text = audio.filter_text
+      ---@diagnostic disable-next-line: duplicate-set-field
       audio.filter_text = function(text)
         local out = filter_text(text)
         return HALLUCINATED[out:lower():gsub('[%p%s]', '')] and '' or out
       end
 
       local insert_streaming_text = audio.insert_streaming_text
+      ---@diagnostic disable-next-line: duplicate-set-field
       audio.insert_streaming_text = function(text)
         local fresh = drop_overlap(text or '')
         if fresh ~= '' then

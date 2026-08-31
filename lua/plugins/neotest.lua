@@ -37,6 +37,7 @@ return {
       {
         '<leader>id',
         function()
+          ---@diagnostic disable-next-line: missing-fields
           require('neotest').run.run { strategy = 'dap' }
         end,
         desc = 'debug',
@@ -104,6 +105,9 @@ return {
           require 'neotest-python' {},
         },
         consumers = {
+          -- The consumer is a table with a __call metamethod, which lua_ls does
+          -- not count as matching the `fun(client)` the field is annotated with.
+          ---@diagnostic disable-next-line: assign-type-mismatch
           overseer = require 'neotest.consumers.overseer',
         },
       }
