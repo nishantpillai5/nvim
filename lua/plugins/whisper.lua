@@ -103,6 +103,8 @@ local function attach(bufnr)
   skip_pending()
   require('whisper.audio').start_polling(cfg())
   vim.g.whisper_dictating = true
+  -- Pulse the lualine indicator now rather than at lualine's next 1s tick.
+  require('util.whisper').start()
 end
 
 local function detach()
