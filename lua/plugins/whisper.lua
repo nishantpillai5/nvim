@@ -6,6 +6,11 @@
 -- (stream.cpp:302), box or not. So the stream is spawned by the first prompt box
 -- and torn down IDLE_MS after the last one closes, which within a session leaves
 -- it warm across turns and charges only the first box for the load.
+--
+-- Saying the word in util/dictation.lua ends dictation and sends the box, so a
+-- prompt can be spoken start to finish without reaching for the keyboard.
+
+local dictation = require 'util.dictation'
 
 -- Whisper's stock captions for silence, matched against a whole line with
 -- punctuation and spaces stripped.
@@ -136,13 +141,18 @@ end
 local function attach(bufnr)
   local state = require 'whisper.state'
   cancel_idle()
-  last_words = {}
   if not state.is_recording() then
+    last_words = {}
     if not start_stream() then
       return
     end
   else
-    -- A warm stream has been transcribing the room since the last box.
+    -- A warm stream has been transcribing the room since the last box, and its
+    -- VAD window still holds the tail of whatever was said into the last one --
+    -- including the word that sent it. skip_pending() drops the lines already
+    -- written, but the next line re-transcribes that window, so last_words has
+    -- to survive the gap for drop_overlap to strip the echo instead of
+    -- replaying it into the fresh box.
     local cursor = vim.api.nvim_win_get_cursor(0)
     state.set_insert_position { buf = bufnr, row = cursor[1], col = cursor[2] }
     state.set_recording_buffer(bufnr)
@@ -162,6 +172,23 @@ local function detach()
   skip_pending()
   require('whisper.audio').stop_polling(cfg())
   arm_idle()
+end
+
+-- Press the box's own <CR> rather than reimplementing it: sending, closing and
+-- the teardown that follows all belong to claudecode.lua's prompt float, and its
+-- insert-mode mapping is the one entry point. Called from the poll timer, so the
+-- box has to still be the buffer whisper has been writing into.
+local function send_prompt()
+  local buf = vim.api.nvim_get_current_buf()
+  if not (vim.g.whisper_dictating and vim.b[buf].claude_prompt) then
+    return false
+  end
+  local map = vim.fn.maparg('<CR>', 'i', false, true)
+  if map.buffer ~= 1 or not map.callback then
+    return false
+  end
+  map.callback()
+  return true
 end
 
 local function auto_dictate(bufnr)
@@ -255,8 +282,19 @@ return {
       ---@diagnostic disable-next-line: duplicate-set-field
       audio.insert_streaming_text = function(text)
         local fresh = drop_overlap(text or '')
-        if fresh ~= '' then
-          insert_streaming_text(fresh)
+        -- Only the Claude path listens for the submit word; plain <leader>nd
+        -- dictation into a file keeps every word it hears.
+        local spoken, heard = fresh, false
+        if vim.g.whisper_dictating then
+          spoken, heard = dictation.split(fresh)
+        end
+        if spoken ~= '' then
+          insert_streaming_text(spoken)
+        end
+        if heard then
+          -- Deferred: the poll that produced this chunk still has its own
+          -- last-read bookkeeping to do, and sending detaches out from under it.
+          vim.schedule(send_prompt)
         end
       end
     end,
