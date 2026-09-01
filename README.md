@@ -199,6 +199,12 @@ spinner, shared by `plugins/overseer.lua` and the lualine task indicator. The
 `_G.filter_build_tasks`, `_G.filter_run_tasks`, `_G.task_formatter`,
 `_G.run_template` and `_G.build_template` hooks are all project-local exrc knobs.
 
+`plugins/overseer.lua` wraps `vim.ui.select` for the `overseer_template` kind
+so `<leader>oo` lists `.vscode/tasks.json` tasks above everything else. Overseer
+v2 removed template sort priority and orders templates by provider-discovery
+order, which is the alphabetical runtimepath glob -- npm before vscode.
+`MODULE_ORDER` in that file is the list of template modules to float to the top.
+
 `lua/overseer/component/custom/vscode_env.lua` is found by overseer on the
 runtimepath as `custom.vscode_env`; it injects `.vscode/.env` (falling back to
 `.env`) into every task's environment via the same `_G.env_reader` the terminal

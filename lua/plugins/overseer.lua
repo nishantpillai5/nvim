@@ -75,6 +75,54 @@ local function step_detail(delta)
   end
 end
 
+-- Template order in the picker is provider-discovery order: overseer globs
+-- lua/overseer/template/*.lua off the runtimepath, so npm sorts above vscode.
+-- v2 deleted template sort priority and template.list does no ordering of its
+-- own, which leaves the picker call as the only place to reorder. Modules named
+-- here come first, in this order; everything else keeps its position after them.
+local MODULE_ORDER = { 'vscode' }
+
+local function template_rank(tmpl)
+  for i, module in ipairs(MODULE_ORDER) do
+    if tmpl.module == module then
+      return i
+    end
+  end
+  return #MODULE_ORDER + 1
+end
+
+local function sort_templates(items)
+  -- table.sort is not stable and the templates within one provider are already
+  -- in a deliberate order (tasks.json order, package.json script order), so the
+  -- original index is the tiebreak.
+  local index = {}
+  for i, item in ipairs(items) do
+    index[item] = i
+  end
+  local sorted = vim.list_slice(items)
+  table.sort(sorted, function(a, b)
+    local ra, rb = template_rank(a), template_rank(b)
+    if ra ~= rb then
+      return ra < rb
+    end
+    return index[a] < index[b]
+  end)
+  return sorted
+end
+
+-- Only overseer's template picker sets this `kind`, so the wrapper is inert for
+-- every other vim.ui.select. snacks owns vim.ui.select and installs it during
+-- its own setup, which lazy runs first because snacks is a dependency here.
+local function order_template_picker()
+  local select = vim.ui.select
+  vim.ui.select = function(items, opts, on_choice)
+    if opts and opts.kind == 'overseer_template' then
+      items = sort_templates(items)
+    end
+    return select(items, opts, on_choice)
+  end
+end
+
 return {
   {
     'stevearc/overseer.nvim',
@@ -254,5 +302,9 @@ return {
         },
       },
     },
+    config = function(_, opts)
+      require('overseer').setup(opts)
+      order_template_picker()
+    end,
   },
 }
