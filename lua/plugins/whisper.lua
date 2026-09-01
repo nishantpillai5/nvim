@@ -1,8 +1,14 @@
 -- Speech to text via whisper.cpp. <leader>nd comes from `keybind`; the lazy key
--- is only a stub. <leader>ad arms dictation into Claude's prompt box, starting
--- whisper-stream once so the 3.1GB model is resident before the first box.
+-- is only a stub. <leader>ad arms dictation into Claude's prompt box.
+--
+-- Arming does not start whisper-stream: in VAD mode it holds the mic open and
+-- runs large-v3 over the trailing window every time it hears anything at all
+-- (stream.cpp:302), box or not. So the stream is spawned by the first prompt box
+-- and torn down IDLE_MS after the last one closes, which within a session leaves
+-- it warm across turns and charges only the first box for the load.
 
--- Whisper's stock silence captions, matched with punctuation and spaces stripped.
+-- Whisper's stock captions for silence, matched against a whole line with
+-- punctuation and spaces stripped.
 local HALLUCINATED = {
   thankyou = true,
   thankyouverymuch = true,
@@ -13,6 +19,10 @@ local HALLUCINATED = {
   you = true,
   bye = true,
 }
+
+-- Long enough to span a Claude turn, short enough that walking away closes the
+-- mic. It only buys back ~0.5s of load, so erring long costs more.
+local IDLE_MS = 120000
 
 -- VAD mode re-transcribes the last `length_ms` on every fire and never clears
 -- the buffer (stream.cpp:305), so chunks arrive carrying the previous tail.
@@ -61,74 +71,114 @@ local function skip_pending()
   require('whisper.state').set_last_read_line(transcript_lines())
 end
 
--- Which flow owns the running whisper-stream. One process and one insert
--- position, so whichever attached second would re-point the other's words.
-local buffer_session = false
-
-local function buffer_dictating()
-  return buffer_session and require('whisper.state').is_recording()
-end
-
-local function arm()
+-- The require pulls the plugin in through lazy, so cfg() sees the real config.
+local function model_ready()
   require 'whisper'
-  if buffer_dictating() then
-    vim.notify('buffer dictation is running -- <leader>nd to stop it', vim.log.levels.WARN)
-    return false
-  end
-  local state = require 'whisper.state'
-  -- A disarm still winding down: reuse the resident model rather than reload it.
-  if state.is_recording() then
+  local model = cfg().model
+  if require('whisper.model').model_exists(model) then
     return true
   end
-  -- <C-g>: whisper maps its trigger into the arming buffer and never puts the
-  -- old mapping back, and <Tab> is claudecode's.
-  local conf = cfg { manual_trigger_key = '<C-g>' }
-  if not require('whisper.model').model_exists(conf.model) then
-    vim.notify('whisper: ' .. conf.model .. ' is not downloaded', vim.log.levels.ERROR)
-    return false
-  end
-  local audio = require 'whisper.audio'
-  audio.start_recording(conf)
-  skip_pending()
-  audio.stop_polling(conf)
-  return state.is_recording()
+  vim.notify('whisper: ' .. model .. ' is not downloaded', vim.log.levels.ERROR)
+  return false
 end
 
-local function disarm()
+---@type uv.uv_timer_t?
+local idle
+
+local function cancel_idle()
+  if idle then
+    idle:stop()
+    idle:close()
+    idle = nil
+  end
+end
+
+local function stop_stream()
+  cancel_idle()
   if package.loaded['whisper'] and require('whisper.state').is_recording() then
     skip_pending()
     require('whisper.audio').stop_recording()
   end
 end
 
+-- `timer` is captured: a box that opens and closes again in the tick before this
+-- runs would otherwise be torn down by its predecessor.
+local function arm_idle()
+  cancel_idle()
+  local timer = vim.uv.new_timer()
+  idle = timer
+  timer:start(
+    IDLE_MS,
+    0,
+    vim.schedule_wrap(function()
+      if idle == timer then
+        stop_stream()
+      end
+    end)
+  )
+end
+
+-- start_recording pins the insert position to the current window and starts
+-- polling itself, so this needs the prompt box current and no attach after.
+local function start_stream()
+  if not model_ready() then
+    return false
+  end
+  local state = require 'whisper.state'
+  -- state.clear keeps model_loaded across runs, so a restart would otherwise
+  -- claim the fresh process is ready the moment it spawns. lualine reads it.
+  state.set_model_loaded(false)
+  -- <C-g>: whisper never restores the mapping it takes, and <Tab> is claudecode's.
+  require('whisper.audio').start_recording(cfg { manual_trigger_key = '<C-g>' })
+  return state.is_recording()
+end
+
 local function attach(bufnr)
   local state = require 'whisper.state'
-  if not state.is_recording() then
-    return
-  end
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  state.set_insert_position { buf = bufnr, row = cursor[1], col = cursor[2] }
-  state.set_recording_buffer(bufnr)
+  cancel_idle()
   last_words = {}
-  skip_pending()
-  require('whisper.audio').start_polling(cfg())
-  -- Breathe now rather than at lualine's next 1s tick.
+  if not state.is_recording() then
+    if not start_stream() then
+      return
+    end
+  else
+    -- A warm stream has been transcribing the room since the last box.
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    state.set_insert_position { buf = bufnr, row = cursor[1], col = cursor[2] }
+    state.set_recording_buffer(bufnr)
+    skip_pending()
+    require('whisper.audio').start_polling(cfg())
+  end
+  vim.g.whisper_dictating = true
+  -- Pulse now rather than at lualine's next 1s tick.
   require('util.whisper').start()
 end
 
 local function detach()
+  vim.g.whisper_dictating = false
   if not (package.loaded['whisper'] and require('whisper.state').is_recording()) then
     return
   end
   skip_pending()
   require('whisper.audio').stop_polling(cfg())
+  arm_idle()
 end
 
 local function auto_dictate(bufnr)
-  if vim.b[bufnr].whisper_auto_dictate then
+  local state = require 'whisper.state'
+  -- Returning to a box we left has to re-attach, since BufLeave detached it.
+  if vim.g.whisper_dictating and state.get_recording_buffer() == bufnr then
     return
   end
-  vim.b[bufnr].whisper_auto_dictate = true
+
+  if not vim.b[bufnr].whisper_auto_dictate then
+    vim.b[bufnr].whisper_auto_dictate = true
+    vim.api.nvim_create_autocmd({ 'BufLeave', 'BufWipeout' }, {
+      buffer = bufnr,
+      desc = 'stop dictating when the Claude prompt box loses focus',
+      callback = detach,
+    })
+  end
 
   -- Deferred: the box moves the cursor past a prefilled @mention after
   -- startinsert, and attach pins the insert position.
@@ -137,13 +187,6 @@ local function auto_dictate(bufnr)
       attach(bufnr)
     end
   end)
-
-  vim.api.nvim_create_autocmd({ 'BufLeave', 'BufWipeout' }, {
-    buffer = bufnr,
-    once = true,
-    desc = 'stop dictating when the Claude prompt box goes away',
-    callback = detach,
-  })
 end
 
 return {
@@ -151,17 +194,19 @@ return {
     'Avi-D-coder/whisper.nvim',
     cmd = { 'WhisperToggle', 'WhisperDownloadModel' },
     keys = {
-      { '<leader>nd', mode = { 'n', 'i', 'v' }, desc = 'dictation' },
+      { '<leader>nd', mode = { 'n', 'i', 'v' }, desc = 'stt' },
     },
     init = function()
       vim.g.whisper_auto_dictate = false
+      vim.g.whisper_dictating = false
 
       vim.keymap.set('n', '<leader>ad', function()
         if vim.g.whisper_auto_dictate then
-          disarm()
           vim.g.whisper_auto_dictate = false
+          vim.g.whisper_dictating = false
+          stop_stream()
           vim.notify 'Claude dictation off'
-        elseif arm() then
+        elseif model_ready() then
           vim.g.whisper_auto_dictate = true
           vim.notify 'Claude dictation on'
         end
@@ -185,7 +230,7 @@ return {
       -- Also strips VAD mode's [timestamp] prefixes, so it is load-bearing.
       filter_markers = true,
       notifications = false,
-      -- 0 selects VAD mode: transcribe on pause. length is the utterance buffer.
+      -- 0 selects VAD mode: transcribe on a pause rather than every step.
       step_ms = 0,
       length_ms = 10000,
       vad_thold = 0.6,
@@ -195,20 +240,6 @@ return {
       require('whisper').setup(opts)
 
       local audio = require 'whisper.audio'
-
-      -- All three entry points resolve toggle_recording at call time
-      -- (whisper/init.lua:9), so one patch covers <leader>nd and both commands.
-      local toggle_recording = audio.toggle_recording
-      ---@diagnostic disable-next-line: duplicate-set-field
-      audio.toggle_recording = function(conf)
-        if vim.g.whisper_auto_dictate then
-          vim.notify('Claude dictation holds the mic -- <leader>ad to turn it off', vim.log.levels.WARN)
-          return
-        end
-        buffer_session = not require('whisper.state').is_recording()
-        toggle_recording(conf)
-      end
-
       local filter_text = audio.filter_text
       ---@diagnostic disable-next-line: duplicate-set-field
       audio.filter_text = function(text)

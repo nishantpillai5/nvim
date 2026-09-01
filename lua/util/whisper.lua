@@ -1,36 +1,27 @@
--- The whisper indicator for lualine, as one component: `filename mic`. The mic
--- says whether anything holds the microphone; it breathes, and the filename
--- appears naming the buffer, only while words are actually landing.
+-- The whisper indicator for lualine, as one component: `filename pulse mic`. The
+-- mic says whether Claude's prompt box is armed (<leader>ad in
+-- plugins/whisper.lua) -- armed, not listening. The filename and the pulse show
+-- up only while words are landing, and name the buffer they land in.
 local M = {}
 
--- The mic breathes by alternating fill while words land -- one icon, and
--- readable without colour. The slashed mic says only that nothing holds the
--- microphone: Claude dictation and buffer dictation are mutually exclusive (see
--- plugins/whisper.lua), so a live session is a live session either way and there
--- is nothing left for a second shape to distinguish.
-local MIC, MIC_HOLLOW, MIC_OFF = '󰍬', '󰍮', '󰍭'
-local THROB = { MIC, MIC_HOLLOW }
--- Per frame, so a full breath is twice this. Also the rate the whole tabline
--- recomputes at while transcribing, so it is not worth pushing much lower.
-local PULSE_MS = 400
+local MIC, MIC_OFF = '󰍬', '󰍭'
 
--- Floats are wrapped in this config's list brackets rather than given an icon of
--- their own -- one icon is the point. A buffer name can't tell a float from a
--- split, and floats are usually scratch buffers with no name at all.
-local FLOAT = { '｢', '｣' }
+-- A breathing wave rather than a spinner, so it reads as a level next to the
+-- static mic. The frame comes off the clock, so the speed is refresh-independent.
+local FRAMES = { '󰕿', '󰖀', '󰕾', '󰖀' }
+-- Also the rate the whole tabline recomputes at while transcribing.
+local PULSE_MS = 500
+
+-- Floats are usually scratch buffers with no name, and a name can't tell a float
+-- from a split.
+local FLOAT_ICON = ''
 
 ---@type uv.uv_timer_t?
 local pulse
--- Index into THROB, advanced by the pulse timer rather than read off the clock:
--- lualine also refreshes on its own timer and on events, and those extra renders
--- have to repeat the current frame instead of jittering the breath.
-local frame = 1
 
--- Whisper is only *writing* while its poll timer is alive. arm() in
--- plugins/whisper.lua leaves `recording` true with the timer stopped and a stale
--- insert position, so is_recording() on its own would name a buffer that never
--- receives a word. is_processing() covers the manual trigger, which polls with
--- defer_fn instead of the timer.
+-- Whisper is only *writing* while its poll timer is alive: between boxes the
+-- stream lingers for its idle window with `recording` still true and a stale
+-- insert position. is_processing() covers the defer_fn-based manual trigger.
 function M.is_writing()
   if not package.loaded['whisper'] then
     return false
@@ -39,9 +30,8 @@ function M.is_writing()
   return state.is_recording() and (state.get_poll_timer() ~= nil or state.is_processing())
 end
 
--- The buffer text will land in. A missing or dead insert position is not an
--- error: audio.insert_streaming_text falls back to insert.insert_text, which
--- writes at the cursor of whatever buffer is current.
+-- A dead insert position is not an error: insert_streaming_text falls back to
+-- writing at the cursor of whatever buffer is current.
 local function target_buf()
   local pos = package.loaded['whisper'] and require('whisper.state').get_insert_position()
   if pos and pos.buf and vim.api.nvim_buf_is_valid(pos.buf) then
@@ -50,8 +40,7 @@ local function target_buf()
   return vim.api.nvim_get_current_buf()
 end
 
--- A window showing `buf`, preferring a floating one, plus whether it floats. Nil
--- when the buffer is being written to while hidden.
+-- Nil when the buffer is being written to while hidden.
 local function window_for(buf)
   local fallback
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -65,8 +54,7 @@ local function window_for(buf)
   return fallback, false
 end
 
--- Floats name themselves in their border title, which beats a scratch buffer's
--- number. `title` is either a string or a list of [text, highlight] chunks.
+-- `title` is either a string or a list of [text, highlight] chunks.
 local function float_title(win)
   local title = vim.api.nvim_win_get_config(win).title
   if type(title) == 'string' then
@@ -92,29 +80,25 @@ local function buf_label(buf)
   return ft ~= '' and ft or ('buffer ' .. buf)
 end
 
--- lualine caches the rendered tabline and recomputes it on its own 1s timer, so
--- `redrawtabline` would only repaint the same frame: the breath has to ask
--- lualine for a refresh. This timer runs only while whisper is writing.
+-- lualine caches the tabline and recomputes it on its own 1s timer, so
+-- `redrawtabline` would only repaint the same frame: the pulse has to ask.
 function M.start()
   if pulse then
     return
   end
-  frame = 1
-  pulse = assert(vim.uv.new_timer())
+  pulse = vim.uv.new_timer()
   pulse:start(
     PULSE_MS,
     PULSE_MS,
     vim.schedule_wrap(function()
-      if M.is_writing() then
-        frame = frame % #THROB + 1
-      else
+      if not M.is_writing() then
         M.stop()
       end
-      -- Queued rather than forced: lualine coalesces refreshes on a 16ms timer
-      -- of its own. The component lives in the tabline.
-      pcall(function()
-        require('lualine').refresh { place = { 'tabline' } }
-      end)
+      local ok, lualine = pcall(require, 'lualine')
+      if ok then
+        -- Queued, not forced: lualine coalesces on a 16ms timer of its own.
+        pcall(lualine.refresh, { place = { 'tabline' } })
+      end
     end)
   )
 end
@@ -126,37 +110,28 @@ function M.stop()
   pulse:stop()
   pulse:close()
   pulse = nil
-  frame = 1
 end
 
--- The one icon. A nil flag means whisper is not in this config at all, which is
--- the only case the component renders nothing for.
+-- A nil flag means whisper is not in this config at all, the one case that
+-- renders nothing.
 local function mic()
   if vim.g.whisper_auto_dictate == nil then
     return ''
-  end
-
-  local recording, model_loaded = false, true
-  if package.loaded['whisper'] then
-    local state = require 'whisper.state'
-    recording, model_loaded = state.is_recording(), state.is_model_loaded()
-  end
-
-  -- Nothing armed for Claude and no buffer session running: the mic is free.
-  if not recording and not vim.g.whisper_auto_dictate then
+  elseif not vim.g.whisper_auto_dictate then
     return MIC_OFF
   end
-  -- Still paging in the 3.1GB model. Said in words rather than breathed, because
-  -- nothing can land yet.
-  if recording and not model_loaded then
-    return MIC .. ' Loading'
+  -- Still paging in the model, so nothing can land yet. Once per cold start,
+  -- which plugins/whisper.lua keeps honest by resetting model_loaded.
+  if package.loaded['whisper'] then
+    local state = require 'whisper.state'
+    if state.is_recording() and not state.is_model_loaded() then
+      return MIC .. ' Loading'
+    end
   end
-  return M.is_writing() and THROB[frame] or MIC
+  return MIC
 end
 
--- `filename mic` while writing, bare mic otherwise. Also owns the pulse timer's
--- lifetime, so the indicator needs nothing in the lualine spec but this one
--- component.
+-- Also owns the pulse timer's lifetime, so the lualine spec needs nothing else.
 function M.status()
   local parts = {}
 
@@ -165,7 +140,8 @@ function M.status()
     local buf = target_buf()
     local win, floating = window_for(buf)
     local label = (floating and win and float_title(win)) or buf_label(buf)
-    parts[1] = floating and (FLOAT[1] .. label .. FLOAT[2]) or label
+    parts[1] = (floating and (FLOAT_ICON .. ' ') or '') .. label
+    parts[2] = FRAMES[math.floor(vim.uv.now() / PULSE_MS) % #FRAMES + 1]
   else
     M.stop()
   end
