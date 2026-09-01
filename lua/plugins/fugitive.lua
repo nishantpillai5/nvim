@@ -1,3 +1,21 @@
+-- `:Git <args>` re-parses its argument string: it splits on shell-style quoting
+-- and expands %, # and <cfile>. Concatenating free text from vim.ui.input into
+-- it therefore garbles any message containing a quote and splices the current
+-- filename into any message containing a %. These three run git over argv
+-- instead (util.git.run), then tell fugitive to refresh its status buffer.
+local function git_input(prompt, args_for, ok_msg)
+  vim.ui.input({ prompt = prompt }, function(input)
+    input = input and vim.trim(input)
+    if not input or input == '' then
+      return
+    end
+    if require('util.git').run(args_for(input), ok_msg(input)) then
+      -- Documented public API: fires FugitiveChanged and reloads the summary.
+      pcall(vim.fn.FugitiveDidChange)
+    end
+  end)
+end
+
 return {
   {
     'tpope/vim-fugitive',
@@ -21,10 +39,10 @@ return {
       {
         '<leader>gb',
         function()
-          vim.ui.input({ prompt = 'Branch name: ' }, function(input)
-            if input and input ~= '' then
-              vim.cmd('Git branch ' .. input)
-            end
+          git_input('Branch name: ', function(name)
+            return { 'branch', name }
+          end, function(name)
+            return 'Created branch ' .. name
           end)
         end,
         desc = 'branch',
@@ -36,10 +54,10 @@ return {
       {
         '<leader>gzz',
         function()
-          vim.ui.input({ prompt = 'Stash message: ' }, function(input)
-            if input and input ~= '' then
-              vim.cmd('Git stash push -m "' .. input .. '"')
-            end
+          git_input('Stash message: ', function(msg)
+            return { 'stash', 'push', '-m', msg }
+          end, function()
+            return 'Stashed'
           end)
         end,
         desc = 'stash',
@@ -47,10 +65,10 @@ return {
       {
         '<leader>gzZ',
         function()
-          vim.ui.input({ prompt = 'Stash message: ' }, function(input)
-            if input and input ~= '' then
-              vim.cmd('Git stash push --include-untracked -m "' .. input .. '"')
-            end
+          git_input('Stash message: ', function(msg)
+            return { 'stash', 'push', '--include-untracked', '-m', msg }
+          end, function()
+            return 'Stashed (including untracked)'
           end)
         end,
         desc = 'stash_untracked',

@@ -83,32 +83,59 @@ return {
       -- the highlight comes from `item.group` alone, and by render time a cell is
       -- a bare padded string. So remember each local item's key/description pair
       -- and recolour it on the way out -- rows go key, separator, icon, desc.
+      --
+      -- Keyed by the buffer the mapping belongs to, not just true: a global
+      -- mapping elsewhere that happens to share a key and description with some
+      -- buffer-local one seen earlier would otherwise be painted local too.
       local locals = {}
 
-      local view = require 'which-key.view'
-      local item = view.item
-      ---@diagnostic disable-next-line: duplicate-set-field
-      view.item = function(node, o)
-        local ret = item(node, o)
-        if node.keymap and (node.keymap.buffer or 0) ~= 0 then
-          locals[ret.key .. '\0' .. ret.desc] = true
-        end
-        return ret
-      end
+      -- view.item and text.append are which-key internals with no stability
+      -- promise. Patching them behind pcall so an upstream rename costs the
+      -- colour rather than turning every which-key popup into a Lua error.
+      local ok_view, view = pcall(require, 'which-key.view')
+      local ok_text, text = pcall(require, 'which-key.text')
 
-      local text = require 'which-key.text'
-      local append = text.append
-      local key -- the key cell of the row being appended
-      text.append = function(self, str, o)
-        local hl = type(o) == 'string' and o or type(o) == 'table' and o.hl
-        if type(str) == 'string' then
-          if hl == 'WhichKey' then
-            key = vim.trim(str)
-          elseif hl == 'WhichKeyDesc' and locals[(key or '') .. '\0' .. vim.trim(str)] then
-            return append(self, str, 'WhichKeyLocal')
+      if ok_view and ok_text and type(view.item) == 'function' and type(text.append) == 'function' then
+        local item = view.item
+        ---@diagnostic disable-next-line: duplicate-set-field
+        view.item = function(node, o)
+          local ret = item(node, o)
+          local buf = node.keymap and node.keymap.buffer or 0
+          if buf ~= 0 and ret and type(ret.key) == 'string' and type(ret.desc) == 'string' then
+            locals[ret.key .. '\0' .. ret.desc] = buf
           end
+          return ret
         end
-        return append(self, str, o)
+
+        local append = text.append
+        local key -- the key cell of the row being appended
+        text.append = function(self, str, o)
+          local hl = type(o) == 'string' and o or type(o) == 'table' and o.hl
+          if type(str) == 'string' then
+            if hl == 'WhichKey' then
+              key = vim.trim(str)
+            elseif hl == 'WhichKeyDesc' then
+              local owner = locals[(key or '') .. '\0' .. vim.trim(str)]
+              if owner and owner == vim.api.nvim_get_current_buf() then
+                return append(self, str, 'WhichKeyLocal')
+              end
+            end
+          end
+          return append(self, str, o)
+        end
+
+        -- Bound the table: without this it only ever grows.
+        vim.api.nvim_create_autocmd('BufDelete', {
+          group = vim.api.nvim_create_augroup('whichkey_local_gc', { clear = true }),
+          desc = 'forget buffer-local which-key descriptions with their buffer',
+          callback = function(args)
+            for k, buf in pairs(locals) do
+              if buf == args.buf then
+                locals[k] = nil
+              end
+            end
+          end,
+        })
       end
 
       -- Re-set on colorscheme, which clears it.

@@ -35,6 +35,9 @@ return {
         desc = 'run_file',
       },
       {
+        -- gtest only in practice: the python adapter this needs is registered by
+        -- plugins/dap_python.lua, which is disabled in lua/enabled.lua. On a
+        -- python test this reports "no adapter for python" until that is on.
         '<leader>id',
         function()
           ---@diagnostic disable-next-line: missing-fields

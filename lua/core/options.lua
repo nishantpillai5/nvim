@@ -23,10 +23,12 @@ vim.o.list = true
 vim.opt.listchars:append 'space:⋅'
 
 -- Undo / backups live under this config's own state dir, so each NVIM_APPNAME
--- stays isolated. Neovim creates the directories on demand.
+-- stays isolated. Neovim creates 'undodir' on demand but NOT 'backupdir' -- with
+-- that directory missing a write just skips its backup silently -- so make it.
 vim.o.undofile = true
 vim.o.undodir = vim.fs.joinpath(vim.fn.stdpath 'state', 'undo')
 vim.o.backupdir = vim.fs.joinpath(vim.fn.stdpath 'state', 'backup')
+vim.fn.mkdir(vim.o.backupdir, 'p')
 
 -- Search
 vim.o.ignorecase = true

@@ -26,7 +26,9 @@ services:
       # call .devcontainer.json makes.
       - claude-config:/home/nvimuser/.claude
       # util.env's DIR_NOTES. obsidian, calendar and global-note all read it, and
-      # obsidian's `event` never fires without it.
+      # obsidian's `event` never fires without it. Note this is bound
+      # unconditionally: on a host with no ~/notes, Docker creates one (root-owned
+      # on Linux) rather than reporting anything -- `mkdir -p ~/notes` first.
       - ${HOME}/notes:/home/nvimuser/notes
     environment:
       # core/options.lua reads this and routes the `"+` maps through OSC 52, since

@@ -63,15 +63,55 @@ return {
       -- With the vault as cwd there is no code to find, so the four general
       -- finders become obsidian's. Done here rather than in telescope.lua
       -- because the override only makes sense once obsidian is loaded.
-      if vim.fs.normalize(vim.uv.cwd() or '') == notes then
-        local map = function(lhs, rhs, desc)
-          vim.keymap.set('n', lhs, rhs, { desc = desc, silent = true })
+      --
+      -- Applied and *undone* on DirChanged: these are global maps, so setting
+      -- them once at load meant a :cd out of the vault left <leader>ff still
+      -- searching notes for the rest of the session. maparg/mapset round-trips
+      -- whatever telescope had there (including lazy's not-yet-loaded stub).
+      local OVERRIDES = {
+        { '<leader>ff', ':Obsidian quick_switch<cr>', 'files(notes)' },
+        { '<leader>?', ':Obsidian search<cr>', 'find_global(notes)' },
+        { '<leader>fs', ':Obsidian toc<cr>', 'symbols(notes)' },
+        { '<leader>fS', ':Obsidian tags<cr>', 'tags(notes)' },
+      }
+      local saved = nil
+
+      -- Resolved on both sides: vim.uv.cwd() reports the real path, so a vault
+      -- reached through a symlink (~/notes -> a cloud folder, /tmp -> /private/tmp
+      -- on macOS) would never compare equal to the configured one.
+      local function same_dir(a, b)
+        if a == '' or b == '' then
+          return false
         end
-        map('<leader>ff', ':Obsidian quick_switch<cr>', 'files(notes)')
-        map('<leader>?', ':Obsidian search<cr>', 'find_global(notes)')
-        map('<leader>fs', ':Obsidian toc<cr>', 'symbols(notes)')
-        map('<leader>fS', ':Obsidian tags<cr>', 'tags(notes)')
+        return (vim.uv.fs_realpath(a) or a) == (vim.uv.fs_realpath(b) or b)
       end
+
+      local function sync_note_finders()
+        local in_vault = same_dir(vim.fs.normalize(vim.uv.cwd() or ''), notes)
+        if in_vault and not saved then
+          saved = {}
+          for _, o in ipairs(OVERRIDES) do
+            saved[o[1]] = vim.fn.maparg(o[1], 'n', false, true)
+            vim.keymap.set('n', o[1], o[2], { desc = o[3], silent = true })
+          end
+        elseif not in_vault and saved then
+          for _, o in ipairs(OVERRIDES) do
+            pcall(vim.keymap.del, 'n', o[1])
+            local prev = saved[o[1]]
+            if type(prev) == 'table' and not vim.tbl_isempty(prev) then
+              pcall(vim.fn.mapset, 'n', false, prev)
+            end
+          end
+          saved = nil
+        end
+      end
+
+      sync_note_finders()
+      vim.api.nvim_create_autocmd('DirChanged', {
+        group = vim.api.nvim_create_augroup('obsidian_note_finders', { clear = true }),
+        desc = 'point the general finders at the vault only while cwd is the vault',
+        callback = sync_note_finders,
+      })
 
       vim.api.nvim_create_autocmd('User', {
         group = vim.api.nvim_create_augroup('obsidian_note', { clear = true }),

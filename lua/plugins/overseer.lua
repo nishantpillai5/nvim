@@ -27,11 +27,18 @@ local function action_on_last(action, filter)
   overseer.run_action(list[1], action)
 end
 
+-- "core" is whatever the project's exrc hooks claim as its run/build tasks;
+-- "other" is the rest. With no hooks set both filters match everything, so
+-- there is no meaningful split and the upper-case keys fall back to acting on
+-- any task rather than reporting nothing found.
 local function core_tasks(task)
   return tasks.filter_run_tasks(task) or tasks.filter_build_tasks(task)
 end
 
 local function other_tasks(task)
+  if not tasks.has_filters() then
+    return true
+  end
   return not core_tasks(task)
 end
 

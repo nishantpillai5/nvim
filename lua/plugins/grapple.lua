@@ -37,7 +37,10 @@ return {
     opts = {
       scope = 'git_branch',
       win_opts = { width = 0.8 },
-      integrations = { resession = true },
+      -- No `integrations` key here: grapple.nvim has no such option and silently
+      -- ignored it. Tags persist through grapple's own save_path, not through
+      -- resession -- plugins/resession.lua's dependency on grapple is only about
+      -- load order.
     },
   },
 }

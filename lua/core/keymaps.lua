@@ -34,7 +34,10 @@ map({ 'n', 'v' }, '<leader>y', [["+y]], { desc = 'yank_to_clipboard' })
 map('n', '<leader>Y', [["+Y]], { desc = 'yank_line_to_clipboard' })
 map({ 'n', 'v' }, '<leader>d', [["+d]], { desc = 'delete_to_clipboard' })
 map({ 'n', 'v' }, '<leader>D', [["_d]], { desc = 'delete_to_void' })
-map({ 'n', 'x' }, '<leader>P', [["+dP]], { desc = 'delete_then_paste_from_clipboard' })
+-- Visual only: `"_d` voids the selection instead of letting it clobber the
+-- unnamed register, so `"+P` still pastes the clipboard. There is no useful
+-- normal-mode form -- `"+d` there just waits for a motion `P` cannot supply.
+map('x', '<leader>P', [["_d"+P]], { desc = 'delete_then_paste_from_clipboard' })
 map({ 'n', 'x' }, '<leader>p', [["+p]], { desc = 'paste_from_clipboard' })
 
 -- Files and buffers
@@ -139,8 +142,13 @@ map('n', '<leader>oy', function()
 end, { desc = 'yank_to_log' })
 
 -- Buffer-local mapping, registered when a file under `pattern` is opened.
+-- Grouped and cleared: <leader>iI re-runs this file, and an ungrouped autocmd
+-- would stack another copy of every map_local on each reload.
+local map_local_group = vim.api.nvim_create_augroup('map_local', { clear = true })
+
 local function map_local(lhs, pattern, rhs, desc)
   vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+    group = map_local_group,
     pattern = pattern,
     callback = function()
       map('n', lhs, rhs, { buffer = true, desc = desc })
@@ -160,10 +168,35 @@ map_local('<leader>ii', config_dir .. '/**', function()
   vim.notify('Sourced config: ' .. file)
 end, 'source_config_current_file')
 
+-- init.lua is only the leader vars plus `require 'core'`, so sourcing MYVIMRC
+-- reloads nothing -- the require is already cached. Drop the base modules from
+-- the cache and re-require them instead. core.lazy and core.lsp are skipped on
+-- purpose: re-running lazy.setup and vim.lsp.enable in a live session is not
+-- reload-safe.
+local BASE_MODULES = {
+  'core.options',
+  'core.filetypes',
+  'core.keymaps',
+  'core.autocmds',
+  'core.commands',
+}
+
 map_local('<leader>iI', config_dir .. '/**', function()
-  vim.cmd.source(vim.env.MYVIMRC)
-  vim.notify('Sourced full config: ' .. vim.env.MYVIMRC)
-end, 'source_config_full')
+  for name in pairs(package.loaded) do
+    if name == 'util' or name:match '^util%.' then
+      package.loaded[name] = nil
+    end
+  end
+  for _, name in ipairs(BASE_MODULES) do
+    package.loaded[name] = nil
+    local ok, err = pcall(require, name)
+    if not ok then
+      vim.notify('Reload failed in ' .. name .. ': ' .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
+  end
+  vim.notify('Reloaded base config: ' .. table.concat(BASE_MODULES, ', '))
+end, 'reload_base_config')
 
 -- Reload external tools from their own config files. vim.system is async and
 -- takes an argv list, so nothing goes through a shell.

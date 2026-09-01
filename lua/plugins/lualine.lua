@@ -19,13 +19,29 @@ local LSP_ICONS = {
   jsonls = '',
 }
 
+-- Four tabline components ask for this per redraw (the component itself, both
+-- array_brackets and the `buffers` cond), and each sweep reads three options per
+-- buffer. vim.uv.now() is the event loop's cached time, so it is stable within a
+-- redraw and advances between them: keying the memo on it collapses the four
+-- sweeps into one without ever serving a value from an earlier redraw.
+local unsaved_alert_cache = { at = -1, value = '' }
+
 local function unsaved_buffer_alert()
+  local now = vim.uv.now()
+  if unsaved_alert_cache.at == now then
+    return unsaved_alert_cache.value
+  end
+
+  local value = ''
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.bo[buf].buflisted and vim.bo[buf].modified and not vim.tbl_contains(EXCLUDED_FTS, vim.bo[buf].filetype) then
-      return '󰽂 '
+      value = '󰽂 '
+      break
     end
   end
-  return ''
+
+  unsaved_alert_cache.at, unsaved_alert_cache.value = now, value
+  return value
 end
 
 local function array_bracket(n)
@@ -38,48 +54,34 @@ local function cwd()
   return vim.uv.cwd()
 end
 
--- Name of the linked git worktree, if the buffer is in one. Reads the `.git`
--- file directly -- the old config used FugitiveGitDir(), and fugitive is not
--- part of this config.
-local function worktree()
-  local root = vim.fs.root(0, '.git')
-  if not root then
-    return ''
+-- Directory of the current buffer, or nil for anything without a real path:
+-- unnamed buffers and pseudo-paths like fugitive:// and oil://, none of which
+-- resolve to a repo anyway.
+local function buf_dir()
+  local name = vim.api.nvim_buf_get_name(0)
+  if name == '' or name:match '^%w+://' then
+    return nil
   end
-  local dotgit = vim.fs.joinpath(root, '.git')
-  local stat = vim.uv.fs_stat(dotgit)
-  if not stat or stat.type ~= 'file' then
-    return ''
-  end
-  local name = (vim.fn.readfile(dotgit, '', 1)[1] or ''):match 'worktrees/(.+)$'
-  return name and (' ' .. name) or ''
+  return vim.fs.dirname(name)
 end
 
--- Branch of the cwd's repository, read straight from HEAD. lualine's own
--- `branch` component resolves the repo by walking up from the *buffer's* path,
--- which resolves nothing for a pseudo-path like `fugitive:///repo/.git//`: it
--- then blanks the branch it had cached, so the statusline loses the branch the
--- moment a fugitive window opens. This is the fallback for that.
+-- Name of the linked git worktree, if the buffer is in one. Resolved from the
+-- `.git` file rather than FugitiveGitDir(), which this config has no fugitive
+-- for; util.git.dir_info caches, since this runs on every redraw.
+local function worktree()
+  local dir = buf_dir()
+  local info = dir and require('util.git').dir_info(dir)
+  return info and info.worktree and (' ' .. info.worktree) or ''
+end
+
+-- Branch of the cwd's repository. lualine's own `branch` component resolves the
+-- repo by walking up from the *buffer's* path, which resolves nothing for a
+-- pseudo-path like `fugitive:///repo/.git//`: it then blanks the branch it had
+-- cached, so the statusline loses the branch the moment a fugitive window opens.
+-- This is the fallback for that.
 local function cwd_branch()
-  local root = vim.fs.root(assert(vim.uv.cwd()), '.git')
-  if not root then
-    return ''
-  end
-
-  local gitdir = vim.fs.joinpath(root, '.git')
-  local stat = vim.uv.fs_stat(gitdir)
-  if stat and stat.type == 'file' then
-    -- Linked worktree or submodule: `.git` points at the real git dir.
-    local target = (vim.fn.readfile(gitdir, '', 1)[1] or ''):match 'gitdir: (.+)$'
-    if not target then
-      return ''
-    end
-    gitdir = vim.fs.normalize(vim.startswith(target, '/') and target or vim.fs.joinpath(root, target))
-  end
-
-  local head = vim.fn.readfile(vim.fs.joinpath(gitdir, 'HEAD'), '', 1)[1] or ''
-  -- Detached HEAD falls back to a short sha, the same width lualine uses.
-  return head:match 'ref: refs/heads/(.+)$' or head:sub(1, 6)
+  local info = require('util.git').dir_info(vim.uv.cwd())
+  return info and info.branch or ''
 end
 
 -- Attached LSP clients, as icons. Was lsp_zero.lua's lualine injection.

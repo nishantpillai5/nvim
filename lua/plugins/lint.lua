@@ -6,8 +6,11 @@ return {
       local lint = require 'lint'
 
       lint.linters_by_ft = {
-        -- cppcheck is broken upstream: mfussenegger/nvim-lint#745
-        c = { 'cppcheck' },
+        -- cppcheck is broken upstream (mfussenegger/nvim-lint#745), so it stays
+        -- off: `available()` below only proves the binary exists, not that its
+        -- output parses, so leaving it listed surfaced the parser's own errors
+        -- on every BufEnter / InsertLeave / BufWritePost in a C file.
+        -- c = { 'cppcheck' },
         typescript = { 'eslint_d' },
         javascript = { 'eslint_d' },
       }

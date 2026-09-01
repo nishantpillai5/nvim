@@ -27,18 +27,6 @@ end
 
 local scope = require 'util.scope'
 
--- Run a git command, report failure instead of failing silently, and let open
--- buffers notice what changed on disk.
-local function git_run(args, ok_msg)
-  local res = vim.system(extend({ 'git' }, args), { text = true }):wait()
-  if res.code == 0 then
-    vim.notify(ok_msg)
-    vim.cmd.checktime()
-  else
-    vim.notify(vim.trim(res.stderr or '') ~= '' and res.stderr or 'git failed', vim.log.levels.ERROR)
-  end
-end
-
 ---------------------------------------------------------------- live grep ----
 
 local function live_grep_file_list(opts, file_list)
@@ -55,8 +43,8 @@ local function live_grep_file_list(opts, file_list)
   require('telescope.builtin').live_grep(opts)
 end
 
-local function git_file_list(args)
-  local res = vim.system(extend({ 'git' }, args), { text = true, cwd = util.root_dir() }):wait()
+local function git_file_list(args, root)
+  local res = vim.system(extend({ 'git' }, args), { text = true, cwd = root or util.root_dir() }):wait()
   if res.code ~= 0 then
     vim.notify(res.stderr or 'git failed', vim.log.levels.ERROR)
     return {}
@@ -71,15 +59,30 @@ end
 local function live_grep_changed(opts)
   opts = opts or {}
   opts.prompt_title = 'Live Grep Changed Files from HEAD'
-  -- `git status --porcelain -u` prefixes a status code; keep the path only.
+  -- `git status --porcelain -u` prefixes a fixed-width status code ("XY "), so
+  -- strip exactly that. Matching the last whitespace-delimited token instead
+  -- truncated any path containing a space to its final component.
   local files = {}
   for _, line in ipairs(git_file_list { 'status', '--porcelain', '-u' }) do
-    table.insert(files, line:match '[^%s]+$')
+    local path = line:sub(4)
+    -- Git quotes paths with unusual characters (core.quotePath); the C-style
+    -- escapes that matter here are \" and \\.
+    if path:sub(1, 1) == '"' then
+      path = path:sub(2, -2):gsub('\\(.)', '%1')
+    end
+    -- A rename reads `old -> new`; `new` is the path that exists now.
+    path = path:match '^.* %-> (.+)$' or path
+    if path ~= '' then
+      table.insert(files, path)
+    end
   end
   live_grep_file_list(opts, files)
 end
 
 local function live_grep_changed_from(ref, opts)
+  if not ref then
+    return
+  end
   local files = git_file_list { 'diff', '--name-only', ref .. '..HEAD' }
   if #files > MAX_GREPPED_FILES then
     vim.notify(('Too many files (%d); limiting to the first %d'):format(#files, MAX_GREPPED_FILES), vim.log.levels.WARN)
@@ -91,7 +94,7 @@ end
 local function live_grep_changed_from_fork(opts)
   opts = opts or {}
   opts.prompt_title = 'Live Grep Changed Files from Fork'
-  live_grep_changed_from(git.fork_point(), opts)
+  live_grep_changed_from(git.require_fork_point(), opts)
 end
 
 local function live_grep_changed_from_main(opts)
@@ -109,19 +112,28 @@ end
 
 ------------------------------------------------------------ changed files ----
 
-local function entry_maker(entry)
-  return {
-    value = entry,
-    display = entry,
-    ordinal = entry,
-    filename = vim.fs.joinpath(vim.uv.cwd(), entry),
-  }
+-- git_file_list runs git from the repo root, so its paths are root-relative --
+-- anchor them there and not at nvim's cwd, which differs the moment you are in
+-- a subdirectory. `root` is captured once per picker rather than re-resolved:
+-- both this and the previewer run with telescope's prompt buffer current, where
+-- util.root_dir() would answer for that buffer instead of the real one.
+local function entry_maker_for(root)
+  return function(entry)
+    return {
+      value = entry,
+      display = entry,
+      ordinal = entry,
+      filename = vim.fs.joinpath(root, entry),
+    }
+  end
 end
 
 -- delta makes the diff readable, but it's an external binary; fall back to
 -- git's own output when it isn't installed.
-local function diff_command(ref, value)
-  local cmd = { 'git' }
+-- `-C` for the same reason as entry_maker_for: the termopen previewer inherits
+-- nvim's cwd, but `value` is relative to the repo root.
+local function diff_command(ref, value, root)
+  local cmd = { 'git', '-C', root }
   if vim.fn.executable 'delta' == 1 then
     vim.list_extend(cmd, { '-c', 'core.pager=delta', '-c', 'delta.side-by-side=false' })
   end
@@ -130,22 +142,35 @@ local function diff_command(ref, value)
 end
 
 local function changed_files_from(ref, include_untracked)
+  if not ref then
+    return
+  end
   local finders = require 'telescope.finders'
   local pickers = require 'telescope.pickers'
   local previewers = require 'telescope.previewers'
   local sorters = require 'telescope.sorters'
 
+  -- Resolved from the buffer you invoked the picker from, then reused
+  -- throughout: see entry_maker_for.
+  local root = util.root_dir()
+  local entry_maker = entry_maker_for(root)
+
   local diff_args = { 'diff', '--name-only', '--diff-filter=ACMR', '--relative', ref }
   local untracked_args = { 'ls-files', '--others', '--exclude-standard' }
 
-  local function results()
-    local files = git_file_list(diff_args)
-    if include_untracked then
+  -- `with_untracked` overrides the picker's own setting, for the <C-i> mapping
+  -- below that pulls untracked files into an already-open picker.
+  local function results(with_untracked)
+    if with_untracked == nil then
+      with_untracked = include_untracked
+    end
+    local files = git_file_list(diff_args, root)
+    if with_untracked then
       local seen = {}
       for _, f in ipairs(files) do
         seen[f] = true
       end
-      for _, f in ipairs(git_file_list(untracked_args)) do
+      for _, f in ipairs(git_file_list(untracked_args, root)) do
         if not seen[f] then
           table.insert(files, f)
           seen[f] = true
@@ -162,24 +187,16 @@ local function changed_files_from(ref, include_untracked)
       sorter = sorters.get_fuzzy_file(),
       previewer = previewers.new_termopen_previewer {
         get_command = function(entry)
-          return diff_command(ref, entry.value)
+          return diff_command(ref, entry.value, root)
         end,
       },
       attach_mappings = function(prompt_bufnr, map)
         map({ 'i', 'n' }, '<C-i>', function()
           local picker = require('telescope.actions.state').get_current_picker(prompt_bufnr)
-          local files = git_file_list(diff_args)
-          local seen = {}
-          for _, f in ipairs(files) do
-            seen[f] = true
-          end
-          for _, f in ipairs(git_file_list(untracked_args)) do
-            if not seen[f] then
-              table.insert(files, f)
-              seen[f] = true
-            end
-          end
-          picker:refresh(finders.new_table { results = files, entry_maker = entry_maker }, { reset_prompt = false })
+          picker:refresh(
+            finders.new_table { results = results(true), entry_maker = entry_maker },
+            { reset_prompt = false }
+          )
         end, { desc = 'include_untracked_files' })
         return true
       end,
@@ -190,13 +207,16 @@ end
 --------------------------------------------------------------------- git -----
 
 local function reset_file_to(ref)
+  if not ref then
+    return
+  end
   local file = vim.fn.expand '%:p'
   if file == '' then
     vim.notify('No file to reset', vim.log.levels.WARN)
     return
   end
   -- Was `:Git checkout` via fugitive, which this config doesn't have.
-  git_run({ 'checkout', ref, '--', file }, 'Reset ' .. vim.fn.fnamemodify(file, ':t') .. ' to ' .. ref)
+  git.run({ 'checkout', ref, '--', file }, 'Reset ' .. vim.fn.fnamemodify(file, ':t') .. ' to ' .. ref)
 end
 
 ---------------------------------------------------------------- pickers ------
@@ -288,7 +308,7 @@ return {
       {
         '<leader>fk',
         function()
-          changed_files_from(git.fork_point())
+          changed_files_from(git.require_fork_point())
         end,
         desc = 'files_from_fork',
       },
@@ -346,7 +366,7 @@ return {
         '<leader>gm',
         function()
           pick.branch(function(branch)
-            git_run({ 'merge', branch }, 'Merged ' .. branch)
+            git.run({ 'merge', branch }, 'Merged ' .. branch)
           end)
         end,
         desc = 'merge_from_branch',
@@ -354,7 +374,7 @@ return {
       {
         '<leader>gRk',
         function()
-          reset_file_to(git.fork_point())
+          reset_file_to(git.require_fork_point())
         end,
         desc = 'reset_file_to_fork',
       },
@@ -456,11 +476,22 @@ return {
       local action_layout = require 'telescope.actions.layout'
       local lga_actions = require 'telescope-live-grep-args.actions'
 
+      -- Bound as `y` in every picker, so it cannot assume entry.value is a
+      -- string: builtins like `commands` (<leader>:) put a table there.
       local function yank_name(prompt_bufnr)
         local entry = require('telescope.actions.state').get_selected_entry()
-        if entry then
-          vim.fn.setreg('+', entry.value)
-          vim.notify('Copied : ' .. entry.value)
+        local name = entry and entry.value
+        if type(name) ~= 'string' then
+          name = entry and entry.ordinal
+        end
+        if type(name) ~= 'string' then
+          name = entry and type(entry.display) == 'string' and entry.display or nil
+        end
+        if name and name ~= '' then
+          vim.fn.setreg('+', name)
+          vim.notify('Copied : ' .. name)
+        else
+          vim.notify('Nothing to copy from this entry', vim.log.levels.WARN)
         end
         actions.close(prompt_bufnr)
       end

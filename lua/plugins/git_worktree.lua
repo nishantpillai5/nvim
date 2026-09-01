@@ -42,33 +42,60 @@ local function worktree_dest(root, name)
   return vim.fs.joinpath(root, '.claude', 'worktrees', name)
 end
 
--- The repo's primary working tree: the first non-bare entry `git worktree list`
--- reports. Records are delimited by the next `worktree` line, so this does not
--- depend on the blank separators that git_lines strips.
-local function main_worktree(cwd)
+-- Worktree records from `--porcelain`, which is the only safely parseable form:
+-- plain `git worktree list` separates its columns with whitespace, so any path
+-- containing a space gets truncated. Records are delimited by the next
+-- `worktree` line, so this does not depend on the blank separators git_lines
+-- strips.
+local function worktree_records(cwd)
   local ok, lines = git_lines { '-C', cwd, 'worktree', 'list', '--porcelain' }
   if not ok then
     return nil
   end
 
-  local path, bare = nil, false
+  local records, cur = {}, nil
   for _, line in ipairs(lines) do
-    local next_path = line:match '^worktree (.+)$'
-    if next_path then
-      if path and not bare then
-        return path
+    local path = line:match '^worktree (.+)$'
+    if path then
+      cur = { path = path }
+      table.insert(records, cur)
+    elseif cur then
+      if line == 'bare' then
+        cur.bare = true
+      elseif line == 'detached' then
+        cur.detached = true
+      else
+        local branch = line:match '^branch (.+)$'
+        if branch then
+          cur.branch = (branch:gsub('^refs/heads/', ''))
+        end
       end
-      path, bare = next_path, false
-    elseif line == 'bare' then
-      bare = true
     end
   end
+  return records
+end
 
-  return (path and not bare) and path or nil
+-- The repo's primary working tree: the first non-bare entry git reports.
+local function main_worktree(cwd)
+  local records = worktree_records(cwd)
+  if not records then
+    return nil
+  end
+  for _, r in ipairs(records) do
+    if not r.bare then
+      return r.path
+    end
+  end
+  return nil
 end
 
 -- Set by the CREATE hook so the create-triggered SWITCH can stay put.
 local stay_after_create = nil
+
+-- Where the user actually was when they asked for a new worktree. create_worktree
+-- has to cd to the repo root before handing off, so the CREATE hook cannot read
+-- the real origin out of vim.uv.cwd() itself.
+local create_origin = nil
 
 local function switch_worktree()
   require('telescope').extensions.git_worktree.git_worktree { cwd = worktree_root() }
@@ -83,24 +110,42 @@ local function create_worktree()
     end
     -- git-worktree.nvim runs every git op from nvim's cwd; point it at the
     -- working tree (not the .git dir) so `git worktree add` resolves right.
+    -- Remember where we came from first: this cd used to be permanent even when
+    -- creation then aborted, and the CREATE hook's "stay put" value was this
+    -- root rather than the directory the user was actually in.
+    create_origin = vim.uv.cwd()
     vim.cmd.cd(vim.fn.fnameescape(root))
-    require('git-worktree').create_worktree(worktree_dest(root, name), name, _G.worktree_from_branch or 'origin/main')
+
+    -- Default the upstream to the repo's real default branch. Hard-coding
+    -- origin/main silently based a new worktree on the current HEAD in any
+    -- repo whose default is something else: git-worktree.nvim treats an
+    -- unresolvable upstream as "no upstream" rather than an error.
+    local upstream = _G.worktree_from_branch or ('origin/' .. require('util.git').main_branch())
+
+    local ok, err = pcall(require('git-worktree').create_worktree, worktree_dest(root, name), name, upstream)
+    if not ok then
+      if create_origin then
+        vim.cmd.cd(vim.fn.fnameescape(create_origin))
+      end
+      create_origin = nil
+      vim.notify('Failed to create worktree: ' .. tostring(err), vim.log.levels.ERROR)
+    end
   end)
 end
 
 local function delete_worktree()
   local root = worktree_root()
-  local ok, lines = git_lines { '-C', root, 'worktree', 'list' }
-  if not ok then
+  local records = worktree_records(root)
+  if not records then
     vim.notify('Not a git repository', vim.log.levels.ERROR)
     return
   end
 
   local items = {}
-  for _, line in ipairs(lines) do
-    local path, rest = line:match '^(%S+)%s+(.*)$'
-    if path and not rest:match '^%(bare%)' then
-      table.insert(items, { path = path, label = line })
+  for _, r in ipairs(records) do
+    if not r.bare then
+      local suffix = (r.branch and ('  [' .. r.branch .. ']')) or (r.detached and '  [detached]') or ''
+      table.insert(items, { path = r.path, label = r.path .. suffix })
     end
   end
   if #items == 0 then
@@ -126,6 +171,48 @@ local function delete_worktree()
       end,
     })
   end)
+end
+
+-- Buffers with unwritten changes whose file lives under `dir`. The stash below
+-- only captures what is on disk, so these would be lost by the --force removal.
+local function modified_buffers_under(dir)
+  -- Buffer names are fully resolved real paths, while `dir` can reach us through
+  -- a symlink (/tmp -> /private/tmp on macOS), so resolve both sides or the
+  -- comparison silently matches nothing.
+  local root = vim.uv.fs_realpath(dir) or dir
+  local prefix = root:gsub('/$', '') .. '/'
+  local out = {}
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].modified then
+      local name = vim.api.nvim_buf_get_name(buf)
+      local real = name ~= '' and (vim.uv.fs_realpath(name) or name) or ''
+      if real:sub(1, #prefix) == prefix then
+        table.insert(out, real:sub(#prefix + 1))
+      end
+    end
+  end
+  return out
+end
+
+-- Gitignored paths in `dir`. `stash push --include-untracked` does NOT stash
+-- these, so `worktree remove --force` deletes them for good -- typically exactly
+-- the local-only files the CREATE hook symlinks in (.env and friends), though a
+-- symlink losing its own entry is harmless while a real file is not.
+local function ignored_paths(dir)
+  -- No --untracked-files=no here: it suppresses the ignored entries too. The
+  -- `!!` filter below is what keeps untracked lines out.
+  local _, lines = git_lines { '-C', dir, 'status', '--porcelain', '--ignored=matching' }
+  local out = {}
+  for _, line in ipairs(lines or {}) do
+    local path = line:match '^!!%s+(.+)$'
+    if path then
+      if path:sub(1, 1) == '"' then
+        path = path:sub(2, -2):gsub('\\(.)', '%1')
+      end
+      table.insert(out, path)
+    end
+  end
+  return out
 end
 
 -- Promote the current worktree onto the main working tree: bring its branch
@@ -162,11 +249,31 @@ local function move_worktree_to_repo()
     return
   end
 
-  local choice = vim.fn.confirm(
-    ('Move worktree "%s" (branch %s) onto\n%s ?'):format(vim.fn.fnamemodify(cur, ':t'), branch, main),
-    '&Yes\n&No',
-    2
-  )
+  -- Unwritten buffer contents cannot be recovered once the worktree is gone, and
+  -- the stash below reads from disk only -- so refuse rather than ask, the same
+  -- way a dirty main tree is refused above.
+  local unsaved = modified_buffers_under(cur)
+  if #unsaved > 0 then
+    vim.notify(
+      'Unsaved changes in this worktree; write or discard them first:\n  ' .. table.concat(unsaved, '\n  '),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  local prompt = ('Move worktree "%s" (branch %s) onto\n%s ?'):format(vim.fn.fnamemodify(cur, ':t'), branch, main)
+  local ignored = ignored_paths(cur)
+  if #ignored > 0 then
+    local shown = vim.list_slice(ignored, 1, math.min(#ignored, 8))
+    prompt = prompt
+      .. ('\n\nThese gitignored paths are NOT stashed and will be deleted (%d):\n  '):format(#ignored)
+      .. table.concat(shown, '\n  ')
+    if #ignored > #shown then
+      prompt = prompt .. ('\n  ... and %d more'):format(#ignored - #shown)
+    end
+  end
+
+  local choice = vim.fn.confirm(prompt, '&Yes\n&No', 2)
   if choice ~= 1 then
     return
   end
@@ -234,7 +341,8 @@ return {
         -- git-worktree.nvim auto-switches into the new worktree right after this
         -- hook. Stash the current cwd so the create-triggered SWITCH can bail
         -- out and leave us where we are instead of following into the new tree.
-        stay_after_create = vim.uv.cwd()
+        stay_after_create = create_origin or vim.uv.cwd()
+        create_origin = nil
 
         -- Symlink local-only files (not tracked by git) into the fresh worktree
         -- so it's ready to run and stays in sync with the source. The hook fires

@@ -55,6 +55,9 @@ end
 -- Split the active scope into ripgrep globs and search dirs, for live_grep over a
 -- file list. Returns opts, extra rg args, extra search dirs.
 function M.constrain(opts)
+  -- Same as M.apply: the no-scope path returns opts untouched, so a nil would
+  -- only blow up once a scope was active.
+  opts = opts or {}
   local scope = M.current()
   if not scope then
     return opts, {}, {}

@@ -3,10 +3,6 @@
 -- suggested reply, and can answer an AskUserQuestion prompt by option key --
 -- all without focusing the terminal.
 
--- Assigned further down; the prompt box calls them before they are defined.
-local ensure_terminal_autoscroll
-local show_no_focus
-
 local function relative_time(mtime)
   local diff = os.time() - mtime
   if diff < 60 then
@@ -38,15 +34,31 @@ local function extract_text(raw)
   return stripped ~= '' and stripped or nil
 end
 
+-- vim.json.decode maps JSON null to vim.NIL, which is *truthy* -- so plain
+-- `t.a and t.a.b` throws on `"a":null`. Both readers below run outside any pcall
+-- that would catch it, and one bad transcript line would take the whole picker
+-- down rather than skipping that line.
+local function json_field(tbl, key)
+  if type(tbl) ~= 'table' then
+    return nil
+  end
+  local v = tbl[key]
+  if v == nil or v == vim.NIL then
+    return nil
+  end
+  return v
+end
+
 local function build_path_map()
   local path_map = {}
   local cj = io.open(vim.fn.expand '~/.claude.json', 'r')
   if cj then
     local ok, data = pcall(vim.json.decode, cj:read '*a')
     cj:close()
-    if ok and data.projects then
+    local projects = ok and json_field(data, 'projects')
+    if projects then
       local home = vim.fn.expand '~'
-      for actual_path, _ in pairs(data.projects) do
+      for actual_path, _ in pairs(projects) do
         local display = actual_path:gsub('^' .. vim.pesc(home), '~')
         path_map[actual_path:gsub('[/.]', '-')] = display
       end
@@ -55,19 +67,25 @@ local function build_path_map()
   return path_map
 end
 
-local function read_session_title(session_file)
-  local sf = io.open(session_file, 'r')
-  if not sf then
-    return ''
-  end
+-- <leader>af re-reads a title per transcript, and transcripts run to tens of
+-- MB, so: cache on file identity (mtime+size), parse only the head of the file
+-- -- both the ai-title and the first user message live near the top -- and stop
+-- as soon as both are in hand. The old version json-decoded every line of every
+-- session on every open.
+local TITLE_SCAN_BYTES = 512 * 1024
+local title_cache = {}
+
+local function parse_session_title(chunk)
   local ai_title, first_msg = nil, ''
-  for line in sf:lines() do
+  for line in chunk:gmatch '[^\n]+' do
+    -- The final line of a truncated chunk is normally incomplete JSON; the
+    -- decode simply fails and it is skipped.
     local ok, entry = pcall(vim.json.decode, line)
-    if ok then
-      if entry.type == 'ai-title' and entry.aiTitle then
+    if ok and type(entry) == 'table' then
+      if entry.type == 'ai-title' and json_field(entry, 'aiTitle') then
         ai_title = entry.aiTitle
       elseif first_msg == '' and entry.type == 'user' then
-        local content = entry.message and entry.message.content
+        local content = json_field(json_field(entry, 'message'), 'content')
         local raw
         if type(content) == 'string' then
           raw = content
@@ -83,10 +101,34 @@ local function read_session_title(session_file)
           first_msg = extract_text(raw:sub(1, 200)) or ''
         end
       end
+      if ai_title and first_msg ~= '' then
+        break
+      end
     end
   end
-  sf:close()
   return (ai_title or first_msg):gsub('\n', ' '):sub(1, 80)
+end
+
+local function read_session_title(session_file)
+  local stat = vim.uv.fs_stat(session_file)
+  local key = stat and (stat.mtime.sec .. ':' .. stat.size) or nil
+  local hit = title_cache[session_file]
+  if key and hit and hit.key == key then
+    return hit.title
+  end
+
+  local sf = io.open(session_file, 'r')
+  if not sf then
+    return ''
+  end
+  local chunk = sf:read(TITLE_SCAN_BYTES) or ''
+  sf:close()
+
+  local title = parse_session_title(chunk)
+  if key then
+    title_cache[session_file] = { key = key, title = title }
+  end
+  return title
 end
 
 -- Forward declaration: defined lower in the file, used by the session picker.
@@ -252,7 +294,16 @@ local BUILTIN_SLASH = {
   'vim',
 }
 
+-- prompt_complete re-derives this on every typed character (see
+-- attach_completion), but the list is static for the lifetime of one prompt box
+-- and the directory walk below is not free. Cache it; attach_completion drops the
+-- cache when a box opens, so a command file added mid-session still shows up.
+local slash_cache = nil
+
 local function slash_command_names()
+  if slash_cache then
+    return slash_cache
+  end
   local names, seen = {}, {}
   local function add(name)
     if name ~= '' and not seen[name] then
@@ -272,6 +323,7 @@ local function slash_command_names()
       add((rel:gsub('/', ':')))
     end
   end
+  slash_cache = names
   return names
 end
 
@@ -327,6 +379,8 @@ end
 -- this, and rebuild the menu out from under the cursor. TextChangedP is needed
 -- alongside TextChangedI because only it fires while the menu is open.
 local function attach_completion(buf)
+  -- One box, one directory walk: see slash_command_names.
+  slash_cache = nil
   local typed = false
   vim.api.nvim_create_autocmd('InsertCharPre', {
     buffer = buf,
@@ -357,6 +411,19 @@ local ghost_ns = vim.api.nvim_create_namespace 'claude_prompt_ghost'
 -- there is no per-cell colour API for terminals, so this can't tell a grey
 -- *suggestion* from text you actually typed into the terminal -- it assumes the
 -- terminal input is untouched, which holds when you pop the box open to answer.
+-- Both scrapers below anchor within a few lines of the terminal's bottom and
+-- never look back further than ~70 (the question scraper's `hint - 60` bound),
+-- but a terminal carries 10k lines of scrollback by default. Fetch a tail with
+-- room to spare rather than copying the whole buffer into Lua on every
+-- <leader><leader> -- which happened twice per press when no question was found.
+-- Every index below is relative to this tail, which is why the bound matters.
+local SCRAPE_TAIL_LINES = 200
+
+local function terminal_tail(bufnr)
+  local count = vim.api.nvim_buf_line_count(bufnr)
+  return vim.api.nvim_buf_get_lines(bufnr, math.max(0, count - SCRAPE_TAIL_LINES), -1, false)
+end
+
 local function get_claude_suggestion()
   local ok, term = pcall(require, 'claudecode.terminal')
   if not ok then
@@ -366,7 +433,7 @@ local function get_claude_suggestion()
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return nil
   end
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local lines = terminal_tail(bufnr)
   local function is_rule(s)
     local stripped, n = s:gsub('\u{2500}', '')
     return n >= 10 and stripped:gsub('%s', '') == ''
@@ -633,10 +700,23 @@ local function open_prompt_input()
     if closed then
       return
     end
+    local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+    local sending = send and text:gsub('%s', '') ~= ''
+
+    -- Send *before* tearing the float down. The prompt buffer is bufhidden=wipe,
+    -- so closing first and then failing to send (Claude exited, channel closed)
+    -- lost whatever had been composed -- and the deferred '\r' below warned a
+    -- second time about the same thing. send_raw has already notified.
+    if sending then
+      local normalized = text:gsub('\r\n', '\n'):gsub('\r', '\n')
+      if not send_raw('\27[200~' .. normalized .. '\27[201~') then
+        return
+      end
+    end
+
     closed = true
     clear_origin_highlight()
     restore_pumheight()
-    local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
@@ -645,9 +725,7 @@ local function open_prompt_input()
     vim.schedule(function()
       vim.cmd 'stopinsert'
     end)
-    if send and text:gsub('%s', '') ~= '' then
-      local normalized = text:gsub('\r\n', '\n'):gsub('\r', '\n')
-      send_raw('\27[200~' .. normalized .. '\27[201~')
+    if sending then
       vim.defer_fn(function()
         send_raw '\r'
       end, 100)
@@ -786,16 +864,30 @@ end
 -- Parse one option line. Returns { num, label, checked } or nil. `checked` is
 -- nil for single-select, true/false for a "[x]"/"[ ]" checkbox.
 local function parse_option_line(line)
+  -- Column the number starts at, with the ❯ highlight marker measured as the
+  -- whitespace it replaces so the highlighted row lines up with the others.
+  -- The scrape loop uses this to reject numbered lines that sit deeper than the
+  -- options -- i.e. a numbered list inside an option's description.
+  local prefix = line:match '^%s*\u{276f}%s*' or line:match '^%s*' or ''
+  local indent = vim.fn.strdisplaywidth(prefix)
+
   local body = line:gsub('^%s*\u{276f}%s*', ''):gsub('^%s*', '')
   local num, rest = body:match '^(%d+)%.%s+(.*)$'
   if not num then
     return nil
   end
+  -- Only a genuine checkbox counts. `1. [P0] Fix it` is a label that happens to
+  -- start with a bracket: treating it as checked flipped the whole question to
+  -- multi-select, and choice_keys then pressed the *other* options' numbers
+  -- (their state differed) while skipping the one actually picked.
   local inside, label = rest:match '^%[([^%]]*)%]%s*(.*)$'
   if inside ~= nil then
-    return { num = tonumber(num), label = label, checked = inside:gsub('%s', '') ~= '' }
+    local mark = inside:gsub('%s', '')
+    if mark == '' or mark == 'x' or mark == 'X' or mark == '\u{2713}' or mark == '\u{2714}' then
+      return { num = tonumber(num), label = label, checked = mark ~= '', indent = indent }
+    end
   end
-  return { num = tonumber(num), label = rest }
+  return { num = tonumber(num), label = rest, indent = indent }
 end
 
 -- Scrape the AskUserQuestion prompt out of the live terminal. Returns
@@ -810,7 +902,7 @@ local function scrape_claude_question()
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return nil
   end
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local lines = terminal_tail(bufnr)
   local last_nonblank = 0
   for i = #lines, 1, -1 do
     if lines[i]:gsub('%s', '') ~= '' then
@@ -822,9 +914,15 @@ local function scrape_claude_question()
   -- bottom-most one -- earlier renders leave stale copies higher in scrollback.
   -- Require it right at the bottom so a stale prompt (no live question) is
   -- rejected rather than answered blind.
+  -- Claude renders this footer as one line carrying every part:
+  -- `Enter to select · ↑/↓ to navigate · Esc to cancel`. Requiring two of those
+  -- phrases together, rather than either alone, is what keeps ordinary output
+  -- from matching -- a turn ending in a todo list (rendered with the same ☐/☑
+  -- glyphs the box header uses) plus any prose mentioning navigation used to be
+  -- enough to pop a bogus answer menu.
   local hint
   for i = #lines, 1, -1 do
-    if lines[i]:find('to navigate', 1, true) or lines[i]:find('Enter to select', 1, true) then
+    if lines[i]:find('to navigate', 1, true) and lines[i]:find('to select', 1, true) then
       hint = i
       break
     end
@@ -853,9 +951,14 @@ local function scrape_claude_question()
   end
 
   local options, question_parts = {}, {}
+  local option_indent -- set by the first option; the rest must line up with it
   for i = top + 1, hint - 1 do
     local o = parse_option_line(lines[i])
+    if o and option_indent and o.indent ~= option_indent then
+      o = nil -- deeper (or shallower) than the options: description text
+    end
     if o then
+      option_indent = option_indent or o.indent
       o.pos = #options + 1
       o.desc = ''
       options[#options + 1] = o
@@ -1046,7 +1149,43 @@ local function claude_win()
   return nil
 end
 
+-- Detect the Claude Code terminal by the command in its term:// buffer name
+-- ("term://{cwd}//{pid}:{command}") -- test the command part only so a plain
+-- shell opened inside a .claude/ dir isn't matched.
+local function is_claude_terminal(buf)
+  if vim.bo[buf].buftype ~= 'terminal' then
+    return false
+  end
+  local name = vim.api.nvim_buf_get_name(buf)
+  local cmd = name:match ':([^:]*)$' or name
+  return cmd:find('claude', 1, true) ~= nil
+end
+
+-- Any Claude terminal at all, shown or hidden. Only consulted when no window is
+-- displaying one, so the buffer sweep is not part of the common tick.
+local function any_claude_terminal()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if is_claude_terminal(buf) then
+      return true
+    end
+  end
+  return false
+end
+
 show_no_focus = function(cmd_args)
+  -- claudecode.nvim drops cmd_args whenever a Claude terminal buffer already
+  -- exists: terminal.lua's ensure_terminal_visible_no_focus returns early when
+  -- one is visible, and the Snacks provider's open() reuses a hidden one without
+  -- looking at the command at all. So --resume/--continue would silently just
+  -- re-show the running session. Say so instead of appearing to work.
+  if cmd_args and any_claude_terminal() then
+    vim.notify(
+      'A Claude session is already running -- close it with <leader>ax to start a different one.',
+      vim.log.levels.WARN
+    )
+    return
+  end
+
   local origin = vim.api.nvim_get_current_win()
   require('claudecode.terminal').ensure_visible({}, cmd_args)
   ensure_terminal_autoscroll()
@@ -1065,18 +1204,6 @@ local function toggle_no_focus(cmd_args)
   end
 end
 
--- Detect the Claude Code terminal by the command in its term:// buffer name
--- ("term://{cwd}//{pid}:{command}") -- test the command part only so a plain
--- shell opened inside a .claude/ dir isn't matched.
-local function is_claude_terminal(buf)
-  if vim.bo[buf].buftype ~= 'terminal' then
-    return false
-  end
-  local name = vim.api.nvim_buf_get_name(buf)
-  local cmd = name:match ':([^:]*)$' or name
-  return cmd:find('claude', 1, true) ~= nil
-end
-
 -- Neovim only auto-follows terminal output in the *focused* window, and terminal
 -- buffers don't fire nvim_buf_attach on_lines for PTY output -- so while you edit
 -- elsewhere the Claude terminal streams past the bottom of its viewport. Poll on
@@ -1084,6 +1211,15 @@ end
 -- last line. The focused window is left alone (Neovim follows it natively, and
 -- you may be scrolling its history there).
 local autoscroll_timer = nil
+
+local function stop_terminal_autoscroll()
+  if autoscroll_timer then
+    autoscroll_timer:stop()
+    autoscroll_timer:close()
+    autoscroll_timer = nil
+  end
+end
+
 ensure_terminal_autoscroll = function()
   if autoscroll_timer then
     return
@@ -1095,14 +1231,26 @@ ensure_terminal_autoscroll = function()
     250,
     vim.schedule_wrap(function()
       local cur = vim.api.nvim_get_current_win()
+      local found = false
       for _, win in ipairs(vim.api.nvim_list_wins()) do
-        if win ~= cur and vim.api.nvim_win_is_valid(win) then
+        if vim.api.nvim_win_is_valid(win) then
           local buf = vim.api.nvim_win_get_buf(win)
           if is_claude_terminal(buf) then
-            local last = vim.api.nvim_buf_line_count(buf)
-            pcall(vim.api.nvim_win_set_cursor, win, { last, 0 })
+            found = true
+            -- The focused window still counts as "found", but Neovim already
+            -- follows output there and you may be reading its history.
+            if win ~= cur then
+              local last = vim.api.nvim_buf_line_count(buf)
+              pcall(vim.api.nvim_win_set_cursor, win, { last, 0 })
+            end
           end
         end
+      end
+      -- Claude is gone (<leader>ax, or the CLI exited): stop instead of waking
+      -- four times a second for the rest of the session. Anything that shows a
+      -- terminal again calls ensure_terminal_autoscroll().
+      if not found and not any_claude_terminal() then
+        stop_terminal_autoscroll()
       end
     end)
   )
@@ -1130,7 +1278,12 @@ end
 
 local function has_unsaved_changes()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].buftype == '' and vim.bo[buf].modified then
+    local buftype = vim.bo[buf].buftype
+    -- 'acwrite' counts as much as a real file buffer: oil.nvim stages pending
+    -- renames and deletes in one and marks it modified, and the `qall!` this
+    -- guards would discard them without a prompt.
+    local writable = buftype == '' or buftype == 'acwrite'
+    if vim.api.nvim_buf_is_loaded(buf) and writable and vim.bo[buf].modified then
       return true
     end
   end
@@ -1258,15 +1411,24 @@ return {
       vim.api.nvim_create_autocmd('BufEnter', {
         group = group,
         pattern = 'term://*',
-        callback = function()
+        callback = function(args)
+          local term_buf = args.buf
           -- Wait briefly just in case we immediately switch out of the buffer
           vim.defer_fn(function()
-            if not is_claude_terminal(0) then
+            -- args.buf rather than 0: open_prompt_input starts the terminal and
+            -- its float takes focus back well inside these 100ms, so resolving
+            -- buffer 0 here would inspect the float and skip the maps entirely.
+            if not vim.api.nvim_buf_is_valid(term_buf) or not is_claude_terminal(term_buf) then
               return
             end
             ensure_terminal_autoscroll()
             -- jk leaves terminal-insert (buffer-local, so other terminals keep jk literal)
-            vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { buffer = 0, silent = true, desc = 'escape terminal mode' })
+            vim.keymap.set(
+              't',
+              'jk',
+              [[<C-\><C-n>]],
+              { buffer = term_buf, silent = true, desc = 'escape terminal mode' }
+            )
             -- tmux-style split navigation from terminal-insert, scoped to this
             -- buffer so shells keep <C-h/j/k/l> for their own line editing.
             for key, dir in pairs { h = 'Left', j = 'Down', k = 'Up', l = 'Right' } do
@@ -1274,7 +1436,7 @@ return {
                 't',
                 '<C-' .. key .. '>',
                 [[<C-\><C-n><Cmd>NvimTmuxNavigate]] .. dir .. [[<CR>]],
-                { buffer = 0, silent = true, desc = 'navigate ' .. dir:lower() }
+                { buffer = term_buf, silent = true, desc = 'navigate ' .. dir:lower() }
               )
             end
           end, 100)

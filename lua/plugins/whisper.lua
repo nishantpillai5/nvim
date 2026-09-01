@@ -226,6 +226,10 @@ return {
       -- An unknown name is not an error: model.lua falls back to base.en.
       model = 'large-v3',
       keybind = '<leader>nd',
+      -- Buffer-local while a recording is live, so it shadows llama.vim's global
+      -- <Tab> accept-line (llama.lua) for that stretch and restores itself on
+      -- stop. Harmless in practice -- the Claude path rebinds to <C-g> anyway --
+      -- but that is why <Tab> stops accepting FIM ghost text mid-dictation.
       manual_trigger_key = '<Tab>',
       -- Also strips VAD mode's [timestamp] prefixes, so it is load-bearing.
       filter_markers = true,

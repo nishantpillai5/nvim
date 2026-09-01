@@ -12,9 +12,14 @@ local function toggle_diffview(open)
   end
 end
 
+-- `spec` returns nil when a base ref could not be resolved (util.git's
+-- require_* variants have already said why), so there is nothing to open.
 local function diffview_open(spec)
   return toggle_diffview(function()
-    vim.cmd('DiffviewOpen ' .. spec())
+    local args = spec()
+    if args then
+      vim.cmd('DiffviewOpen ' .. args)
+    end
   end)
 end
 
@@ -27,7 +32,8 @@ return {
       {
         '<leader>gk',
         diffview_open(function()
-          return git.fork_point() .. '...HEAD'
+          local base = git.require_fork_point()
+          return base and base .. '...HEAD'
         end),
         desc = 'diff_from_fork',
       },
@@ -65,7 +71,8 @@ return {
         -- Note: merge_base here, not fork_point -- matching the old config.
         '<leader>gfk',
         diffview_open(function()
-          return git.merge_base() .. '...HEAD -- %'
+          local base = git.require_merge_base()
+          return base and base .. '...HEAD -- %'
         end),
         desc = 'file_diff_from_fork',
       },
@@ -80,7 +87,7 @@ return {
         '<leader>gf;',
         toggle_diffview(function()
           pick.branch(function(branch)
-            vim.cmd('DiffviewOpen origin/' .. branch .. '...%')
+            vim.cmd('DiffviewOpen origin/' .. branch .. '...HEAD -- %')
           end)
         end),
         desc = 'file_diff_from_branch',

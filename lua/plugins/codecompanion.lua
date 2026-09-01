@@ -1,3 +1,10 @@
+-- OFF: commented out in lua/enabled.lua and absent from lazy-lock.json, so none
+-- of this loads. Kept for the llama-server adapter config, which is the fiddly
+-- part to rebuild.
+--
+-- Before re-enabling: <leader>cc, <leader>cl and <leader>c; below are the same
+-- lhs and modes as omp.lua's three OMP bindings. Whichever plugin registers its
+-- keys last wins, so turning this on silently shadows them -- rebind one side.
 return {
   {
     'olimorris/codecompanion.nvim',

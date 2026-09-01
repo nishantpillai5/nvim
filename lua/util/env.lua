@@ -27,7 +27,11 @@ M.defaults = {
 }
 
 for key, default in pairs(M.defaults) do
-  M[key] = vim.env[key] or default
+  local value = vim.env[key]
+  -- An exported-but-empty variable is not an override: '' is truthy in Lua, so
+  -- `export DIR_NOTES=` would otherwise hand obsidian, calendar and global-note
+  -- an empty vault path instead of the default.
+  M[key] = (value ~= nil and value ~= '') and value or default
 end
 
 -- Prefix for the `gco` custom comment, e.g. "NISH: ".
