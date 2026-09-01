@@ -55,7 +55,7 @@ return {
   'andrewferrier/debugprint.nvim',
   'kevinhwang91/nvim-ufo',
   'RRethy/vim-illuminate',
-  'norcalli/nvim-colorizer.lua',
+  'catgoose/nvim-colorizer.lua',
   'folke/zen-mode.nvim',
   'alexghergh/nvim-tmux-navigation',
 

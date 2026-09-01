@@ -44,8 +44,13 @@ vim.diagnostic.config {
   signs = false,
   severity_sort = true,
   underline = true,
-  -- 0.11+: opening the float on ]d / [d jumps.
-  jump = { float = true },
+  -- 0.11+: opening the float on ]d / [d jumps. Same behaviour the removed
+  -- `jump.float = true` shim gave us.
+  jump = {
+    on_jump = function(_, bufnr)
+      vim.diagnostic.open_float { bufnr = bufnr, scope = 'cursor', focus = false }
+    end,
+  },
 }
 
 local function on_attach(client, bufnr)

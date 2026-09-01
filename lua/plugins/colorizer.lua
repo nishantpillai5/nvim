@@ -1,15 +1,12 @@
 return {
   {
-    'norcalli/nvim-colorizer.lua',
-    -- Not VeryLazy: setup() only registers FileType autocmds and never attaches
-    -- buffers that are already open, so `nvim foo.css` would go uncolored until
-    -- the next :e.
+    'catgoose/nvim-colorizer.lua',
     event = { 'BufReadPre', 'BufNewFile' },
     config = function()
-      require('colorizer').setup(
-        { 'lua', 'css', 'javascript', html = { mode = 'foreground' } },
-        { mode = 'background' }
-      )
+      require('colorizer').setup {
+        filetypes = { 'lua', 'css', 'javascript', html = { display = { mode = 'foreground' } } },
+        options = { display = { mode = 'background' } },
+      }
     end,
   },
 }

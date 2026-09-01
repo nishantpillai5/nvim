@@ -49,7 +49,11 @@ return {
     },
     opts = {
       extensions = {
-        overseer = { recent_first = true },
+        -- overseer v2 moved the bundle feature's `autostart_on_load` here, and
+        -- the extension's config is now { autostart_on_load, filter } -- the
+        -- old `recent_first` was a list_tasks option that no longer exists.
+        -- Without this, loading a session restarts every task it restores.
+        overseer = { autostart_on_load = false },
       },
     },
   },

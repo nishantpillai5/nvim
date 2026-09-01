@@ -1,13 +1,20 @@
 local tasks = require 'util.tasks'
 
 -- PANEL_POSITION was a global env knob; overseer and toggleterm each keep their
--- own constant now.
+-- own constant now. v2 names the split direction rather than an action.
 local PANEL = 'horizontal' -- 'horizontal' | 'vertical'
-local OPEN_ACTION = PANEL == 'vertical' and 'OpenVsplit' or 'OpenSplit'
+local OPEN_DIR = PANEL == 'vertical' and 'vsplit' or 'split'
+
+-- v2 dropped `list_tasks { recent_first = true }` for a `sort` callback.
+-- sort_newest_first is the same ordering (newest start time first); the module
+-- is required lazily so these helpers stay cheap on the statusline path.
+local function newest_first()
+  return require('overseer.task_list').sort_newest_first
+end
 
 local function action_on_all(action)
   local overseer = require 'overseer'
-  local list = overseer.list_tasks { recent_first = true }
+  local list = overseer.list_tasks { sort = newest_first() }
   if vim.tbl_isempty(list) then
     vim.notify('No tasks found', vim.log.levels.WARN)
     return
@@ -19,7 +26,7 @@ end
 
 local function action_on_last(action, filter)
   local overseer = require 'overseer'
-  local list = overseer.list_tasks { recent_first = true, filter = filter }
+  local list = overseer.list_tasks { sort = newest_first(), filter = filter }
   if vim.tbl_isempty(list) then
     vim.notify('No tasks found', vim.log.levels.WARN)
     return
@@ -42,56 +49,60 @@ local function other_tasks(task)
   return not core_tasks(task)
 end
 
-local function run_template(global, label)
+local function run_task(global, label)
   return function()
     if _G[global] == nil then
       vim.notify(label .. ' template not set', vim.log.levels.ERROR)
       return
     end
-    require('overseer').run_template(_G[global])
+    -- v2 renamed run_template -> run_task; the opts table is unchanged apart
+    -- from `prompt` becoming `disallow_prompt`, which no exrc here sets.
+    require('overseer').run_task(_G[global])
   end
 end
 
-local function select_bundle(prompt, command)
+-- v2 replaced the 1-3 `default_detail` levels with a render function, so L/H
+-- swap the formatter and force a redraw instead of nudging a detail counter.
+local DETAIL_FORMATS = { 'format_compact', 'format_standard', 'format_verbose' }
+local detail = 1
+
+local function step_detail(delta)
   return function()
-    local overseer = require 'overseer'
-    vim.ui.select(overseer.list_task_bundles(), {
-      prompt = prompt,
-    }, function(selected)
-      if selected then
-        vim.cmd(command .. ' ' .. selected)
-      end
-    end)
+    detail = math.min(#DETAIL_FORMATS, math.max(1, detail + delta))
+    -- touch() no-ops without a task argument; on_task_updated is the
+    -- unconditional re-render.
+    require('overseer.task_list').on_task_updated()
   end
 end
 
 return {
   {
     'stevearc/overseer.nvim',
-    -- FIXME: pinned, see stevearc/overseer.nvim#448
-    version = '^1.6.0',
+    version = '^2.0.0',
     dependencies = {
-      'akinsho/nvim-toggleterm.lua',
+      -- No toggleterm: v2 deleted the toggleterm and terminal strategies. Task
+      -- output is a terminal buffer via the default `output.use_terminal`.
       'nvim-telescope/telescope.nvim',
       'folke/snacks.nvim',
     },
     cmd = {
-      'OverseerList',
-      'OverseerRun',
-      'OverseerRunCmd',
+      'OverseerOpen',
+      'OverseerClose',
       'OverseerToggle',
-      'OverseerBuild',
+      'OverseerRun',
+      'OverseerShell',
       'OverseerTaskAction',
-      'OverseerLoadBundle',
-      'OverseerDeleteBundle',
     },
     keys = {
       { '<leader>oo', '<cmd>OverseerRun<cr>', desc = 'run_from_list' },
-      { '<leader>oRr', ':OverseerRunCmd ', desc = 'run_cmd_with_template' },
+      -- OverseerRunCmd is gone; OverseerShell is v2's "run this shell command
+      -- as a task", and with `!` it creates the task without starting it --
+      -- the nearest thing left to the deleted OverseerBuild.
+      { '<leader>oRr', ':OverseerShell ', desc = 'run_shell_cmd' },
       { '<leader>eo', '<cmd>OverseerToggle<cr>', desc = 'tasks' },
       { '<leader>of', '<cmd>OverseerTaskAction<cr>', desc = 'change_task' },
       { '<leader>fO', '<cmd>OverseerTaskAction<cr>', desc = 'tasks' },
-      { '<leader>on', '<cmd>OverseerBuild<cr>', desc = 'new' },
+      { '<leader>on', ':OverseerShell! ', desc = 'new' },
 
       -- Act on the most recent task. Lower case targets run/build tasks, upper
       -- case everything else.
@@ -186,44 +197,44 @@ return {
         end,
         desc = 'stop_all',
       },
-      {
-        '<leader>ows',
-        function()
-          action_on_last 'save'
-        end,
-        desc = 'save_last',
-      },
 
-      { '<leader>or', run_template('run_template', 'Run'), desc = 'run' },
-      { '<leader>ob', run_template('build_template', 'Build'), desc = 'build' },
+      -- <leader>ows / owl / owd are gone with task bundles, which v2 deleted in
+      -- favour of the resession extension configured in plugins/resession.lua.
 
-      { '<leader>owl', select_bundle('Load bundle', 'OverseerLoadBundle'), desc = 'load_bundle' },
-      { '<leader>owd', select_bundle('Delete bundle', 'OverseerDeleteBundle'), desc = 'delete_bundle' },
+      { '<leader>or', run_task('run_template', 'Run'), desc = 'run' },
+      { '<leader>ob', run_task('build_template', 'Build'), desc = 'build' },
     },
     opts = {
-      strategy = { 'toggleterm', open_on_start = false },
-      bundles = { autostart_on_load = false },
+      -- No `strategy`: v2 removed the option along with the toggleterm and
+      -- terminal strategies, and jobstart-into-a-terminal-buffer is the default.
+      -- `bundles` went with the bundle feature; autostart_on_load moved to the
+      -- resession extension.
       dap = false,
       task_list = {
-        default_detail = 1,
-        width = 0.13,
-        bindings = {
+        -- `width` only ever applied to a left/right task list, and direction
+        -- defaults to "bottom", so it was already inert -- v2 dropped it.
+        render = function(task)
+          return require('overseer.render')[DETAIL_FORMATS[detail]](task)
+        end,
+        -- `bindings` -> `keymaps`, and the action names are now "keymap.*"
+        -- handlers taking an `opts` table.
+        keymaps = {
           -- Freed up for tmux-style window navigation.
           ['<C-h>'] = false,
           ['<C-j>'] = false,
           ['<C-k>'] = false,
           ['<C-l>'] = false,
-          ['L'] = 'IncreaseDetail',
-          ['H'] = 'DecreaseDetail',
-          ['v'] = 'OpenVsplit',
-          ['s'] = 'OpenSplit',
-          ['<CR>'] = OPEN_ACTION,
-          ['c'] = 'RunAction',
-          ['d'] = 'Dispose',
-          ['j'] = 'NextTask',
-          ['k'] = 'PrevTask',
-          ['x'] = 'Stop',
-          ['r'] = 'Restart', -- FIXME: doesn't work
+          ['L'] = { step_detail(1), desc = 'Increase task detail' },
+          ['H'] = { step_detail(-1), desc = 'Decrease task detail' },
+          ['v'] = { 'keymap.open', opts = { dir = 'vsplit' }, desc = 'Open task output in vsplit' },
+          ['s'] = { 'keymap.open', opts = { dir = 'split' }, desc = 'Open task output in split' },
+          ['<CR>'] = { 'keymap.open', opts = { dir = OPEN_DIR }, desc = 'Open task output' },
+          ['c'] = 'keymap.run_action',
+          ['d'] = { 'keymap.run_action', opts = { action = 'dispose' }, desc = 'Dispose task' },
+          ['j'] = 'keymap.next_task',
+          ['k'] = 'keymap.prev_task',
+          ['x'] = { 'keymap.run_action', opts = { action = 'stop' }, desc = 'Stop task' },
+          ['r'] = { 'keymap.run_action', opts = { action = 'restart' }, desc = 'Restart task' },
         },
       },
       component_aliases = {

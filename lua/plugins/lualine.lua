@@ -128,7 +128,11 @@ local function last_build_text()
     return ''
   end
   local tasks = require 'util.tasks'
-  local list = overseer.list_tasks { recent_first = true, filter = tasks.filter_build_tasks }
+  -- overseer v2 replaced `recent_first` with a sort callback.
+  local list = overseer.list_tasks {
+    sort = require('overseer.task_list').sort_newest_first,
+    filter = tasks.filter_build_tasks,
+  }
   if vim.tbl_isempty(list) then
     return ''
   end
@@ -149,7 +153,7 @@ local function last_run_text()
   end
   local tasks = require 'util.tasks'
   local list = overseer.list_tasks {
-    recent_first = true,
+    sort = require('overseer.task_list').sort_newest_first,
     filter = tasks.filter_run_tasks,
     status = { 'RUNNING' },
   }
