@@ -49,6 +49,59 @@ local function json_field(tbl, key)
   return v
 end
 
+-- Claude's string hash over the raw path, in base36: `(h << 5) - h + c | 0`
+-- per character, which taken mod 2^32 is the `h * 31 + c` below.
+local function key_hash(path)
+  local h = 0
+  for i = 1, #path do
+    h = (h * 31 + path:byte(i)) % 0x100000000
+  end
+  -- Back to the signed int32 the CLI hashes with, then Math.abs.
+  if h >= 0x80000000 then
+    h = 0x100000000 - h
+  end
+  if h == 0 then
+    return '0'
+  end
+  local digits, out = '0123456789abcdefghijklmnopqrstuvwxyz', ''
+  while h > 0 do
+    local d = h % 36
+    out = digits:sub(d + 1, d + 1) .. out
+    h = math.floor(h / 36)
+  end
+  return out
+end
+
+-- Claude keys each project's sessions under ~/.claude/projects by its path:
+-- non-alphanumerics become '-', and a key over 200 characters is cut there with
+-- a hash suffix. Mirrors the CLI exactly; a key one character off finds nothing.
+local PROJECT_KEY_MAX = 200
+
+local function encode_project(dir)
+  local key = (dir:gsub('[^a-zA-Z0-9]', '-'))
+  if #key <= PROJECT_KEY_MAX then
+    return key
+  end
+  return key:sub(1, PROJECT_KEY_MAX) .. '-' .. key_hash(dir)
+end
+
+-- The .jsonl transcripts recorded under one project key, in glob order.
+local function session_files(key)
+  return vim.fn.glob(vim.fn.expand '~/.claude/projects' .. '/' .. key .. '/*.jsonl', false, true)
+end
+
+-- Session id of the most recently written transcript under `key`, or nil.
+local function newest_session(key)
+  local newest, newest_at = nil, -1
+  for _, f in ipairs(session_files(key)) do
+    local at = vim.fn.getftime(f)
+    if at > newest_at then
+      newest, newest_at = f, at
+    end
+  end
+  return newest and vim.fn.fnamemodify(newest, ':t:r') or nil
+end
+
 local function build_path_map()
   local path_map = {}
   local cj = io.open(vim.fn.expand '~/.claude.json', 'r')
@@ -60,7 +113,7 @@ local function build_path_map()
       local home = vim.fn.expand '~'
       for actual_path, _ in pairs(projects) do
         local display = actual_path:gsub('^' .. vim.pesc(home), '~')
-        path_map[actual_path:gsub('[/.]', '-')] = display
+        path_map[encode_project(actual_path)] = display
       end
     end
   end
@@ -134,35 +187,52 @@ end
 -- Forward declaration: defined lower in the file, used by the session picker.
 local show_no_focus
 
+-- Forward declaration: defined next to show_no_focus.
+local launch_claude
+
+-- Directory the *next* Claude process should start in, parked by the worktree
+-- maps and consumed by the cwd_provider in setup below. nil = nvim's own cwd.
+local worktree_cwd
+
 -- Forward declaration: assigned lower in the file. Declared above
 -- open_prompt_input (not just above show_no_focus) so the prompt box can start
 -- the terminal with autoscroll too.
 local ensure_terminal_autoscroll
 
-local function pick_claude_session()
+-- Session picker. Bare (<leader>af) it lists every project's sessions;
+-- `opts.key` narrows that to one project key and `opts.cwd` is where Claude then
+-- runs, which for a deleted worktree is the repo it was folded back into.
+-- Sessions under another key are dimmed but still resumable: `claude --resume
+-- <id>` falls back to scanning ~/.claude/projects for that id.
+---@param opts { key: string?, cwd: string?, title: string?, allow_new: boolean? }?
+local function pick_claude_session(opts)
   local pickers = require 'telescope.pickers'
   local finders = require 'telescope.finders'
   local conf = require('telescope.config').values
   local actions = require 'telescope.actions'
   local action_state = require 'telescope.actions.state'
 
+  opts = opts or {}
   local path_map = build_path_map()
   local sessions_base = vim.fn.expand '~/.claude/projects'
-  local cwd_encoded = vim.fn.getcwd():gsub('[/.]', '-')
+  local run_cwd = opts.cwd
+  local home_key = encode_project(run_cwd or vim.fn.getcwd())
   local entries = {}
 
   for _, project_dir in ipairs(vim.fn.glob(sessions_base .. '/*', false, true)) do
     local encoded_name = vim.fn.fnamemodify(project_dir, ':t')
     local display_project = path_map[encoded_name] or encoded_name
 
-    for _, session_file in ipairs(vim.fn.glob(project_dir .. '/*.jsonl', false, true)) do
-      table.insert(entries, {
-        session_id = vim.fn.fnamemodify(session_file, ':t:r'),
-        project = display_project,
-        summary = read_session_title(session_file),
-        mtime = vim.fn.getftime(session_file),
-        loadable = encoded_name == cwd_encoded,
-      })
+    if not opts.key or encoded_name == opts.key then
+      for _, session_file in ipairs(vim.fn.glob(project_dir .. '/*.jsonl', false, true)) do
+        table.insert(entries, {
+          session_id = vim.fn.fnamemodify(session_file, ':t:r'),
+          project = display_project,
+          summary = read_session_title(session_file),
+          mtime = vim.fn.getftime(session_file),
+          loadable = encoded_name == home_key,
+        })
+      end
     end
   end
 
@@ -173,16 +243,31 @@ local function pick_claude_session()
     return a.mtime > b.mtime
   end)
 
+  -- After the sort, so it stays pinned above the sessions: a worktree nobody has
+  -- opened yet has none, and the picker would otherwise be a dead end.
+  if opts.allow_new then
+    local home = vim.fn.expand '~'
+    table.insert(entries, 1, {
+      new = true,
+      -- Telescope reads `value` off every entry, so keep it a string.
+      session_id = '',
+      summary = 'Start a new session',
+      project = ((run_cwd or vim.fn.getcwd()):gsub('^' .. vim.pesc(home), '~')),
+      mtime = 0,
+      loadable = true,
+    })
+  end
+
   pickers
     .new({}, {
-      prompt_title = 'Claude Sessions',
+      prompt_title = opts.title or 'Claude Sessions',
       finder = finders.new_table {
         results = entries,
         entry_maker = function(entry)
           local make_display = function(e)
             local title = e.summary ~= '' and e.summary or '(no message)'
             local path_str = '  ' .. e.project
-            local time_str = '  ' .. relative_time(e.mtime)
+            local time_str = e.new and '' or ('  ' .. relative_time(e.mtime))
             local display = title .. path_str .. time_str
             if not e.loadable then
               return display, { { { 0, #display }, 'LspInlayHint' } }
@@ -201,6 +286,7 @@ local function pick_claude_session()
             project = entry.project,
             mtime = entry.mtime,
             loadable = entry.loadable,
+            new = entry.new,
           }
         end,
       },
@@ -208,17 +294,19 @@ local function pick_claude_session()
       attach_mappings = function(prompt_bufnr, map)
         local function resume_session()
           local selection = action_state.get_selected_entry()
-          if selection and not selection.loadable then
-            vim.notify(
-              'Session belongs to ' .. selection.project .. ' — not resumable from this directory.',
-              vim.log.levels.WARN
-            )
+          if not selection then
             return
           end
           actions.close(prompt_bufnr)
-          if selection then
-            show_no_focus('--resume ' .. selection.value)
+          -- `cond and nil or x` is always x in Lua, so branch explicitly.
+          local cmd_args = nil
+          if not selection.new then
+            cmd_args = '--resume ' .. selection.value
+            if not selection.loadable then
+              vim.notify('Resuming a session from ' .. selection.project)
+            end
           end
+          launch_claude(cmd_args, run_cwd)
         end
         map('i', '<CR>', resume_session)
         map('n', '<CR>', resume_session)
@@ -226,6 +314,125 @@ local function pick_claude_session()
       end,
     })
     :find()
+end
+
+-- Worktrees this repo no longer has, but whose sessions are still on disk:
+-- <leader>wwm and <leader>wwd remove the directory, the transcripts under
+-- ~/.claude/projects outlive it. Matched by key prefix, newest first -- the
+-- encoding is lossy, so the real path cannot be recovered from a key.
+local function orphaned_worktrees(root, live_keys)
+  local prefix = encode_project(vim.fs.joinpath(root, '.claude', 'worktrees') .. '/')
+  local items = {}
+  for _, dir in ipairs(vim.fn.glob(vim.fn.expand '~/.claude/projects' .. '/*', false, true)) do
+    local key = vim.fn.fnamemodify(dir, ':t')
+    if key:sub(1, #prefix) == prefix and not live_keys[key] then
+      local files = session_files(key)
+      if #files > 0 then
+        local newest = 0
+        for _, f in ipairs(files) do
+          newest = math.max(newest, vim.fn.getftime(f))
+        end
+        table.insert(items, {
+          key = key,
+          cwd = root,
+          deleted = true,
+          -- The name minus the shared prefix; its '/' went with the encoding.
+          name = key:sub(#prefix + 1),
+          mtime = newest,
+        })
+      end
+    end
+  end
+  table.sort(items, function(a, b)
+    return a.mtime > b.mtime
+  end)
+  return items
+end
+
+-- Pick one of this repo's worktrees -- live ones first, then deleted ones that
+-- still have sessions -- and hand it to `cb`. Claude runs with its cwd in the
+-- worktree (for a deleted one, in the repo) while nvim's cwd stays put.
+local function pick_worktree(cb)
+  local cwd = vim.uv.cwd() or '.'
+  local records = require('util.git').worktrees(cwd)
+  if not records then
+    vim.notify('Not a git repository', vim.log.levels.ERROR)
+    return
+  end
+
+  -- Marked rather than hidden: picking the tree nvim is in is legitimate.
+  local info = require('util.git').dir_info(cwd)
+  local here = info and info.root and (vim.uv.fs_realpath(info.root) or info.root) or nil
+
+  local items, live_keys, root = {}, {}, nil
+  for _, r in ipairs(records) do
+    if not r.bare then
+      root = root or r.path -- git lists the primary working tree first
+      local real = vim.uv.fs_realpath(r.path) or r.path
+      local suffix = (r.branch and ('  [' .. r.branch .. ']')) or (r.detached and '  [detached]') or ''
+      local name = vim.fn.fnamemodify(r.path, ':t')
+      live_keys[encode_project(r.path)] = true
+      table.insert(items, {
+        key = encode_project(r.path),
+        cwd = r.path,
+        name = name,
+        label = name .. suffix .. (real == here and '  (current)' or ''),
+      })
+    end
+  end
+
+  if root then
+    for _, item in ipairs(orphaned_worktrees(root, live_keys)) do
+      item.label = item.name .. '  [deleted — ' .. relative_time(item.mtime) .. ']'
+      table.insert(items, item)
+    end
+  end
+
+  if #items == 0 then
+    vim.notify('No worktrees found', vim.log.levels.WARN)
+    return
+  end
+
+  vim.ui.select(items, {
+    prompt = 'Claude in worktree',
+    format_item = function(item)
+      return item.label
+    end,
+  }, function(choice)
+    if choice then
+      cb(choice)
+    end
+  end)
+end
+
+-- <leader>aw: pick a worktree and pick up its last session. Nothing to continue
+-- in one nobody has opened, so start fresh there instead; and `--continue` only
+-- looks at the current directory, so a deleted worktree's session needs its id.
+local function continue_in_worktree()
+  pick_worktree(function(item)
+    if item.deleted then
+      local id = newest_session(item.key)
+      if not id then
+        vim.notify('No sessions left for ' .. item.name, vim.log.levels.WARN)
+        return
+      end
+      launch_claude('--resume ' .. id, item.cwd)
+    else
+      launch_claude(#session_files(item.key) > 0 and '--continue' or nil, item.cwd)
+    end
+  end)
+end
+
+-- <leader>aW: same, but choose which of that worktree's sessions to resume.
+local function pick_worktree_session()
+  pick_worktree(function(item)
+    pick_claude_session {
+      key = item.key,
+      cwd = item.cwd,
+      title = 'Claude in ' .. item.name .. (item.deleted and ' (deleted)' or ''),
+      allow_new = not item.deleted,
+    }
+  end)
 end
 
 -- Write raw bytes straight to the running Claude terminal's PTY without moving
@@ -1196,6 +1403,23 @@ show_no_focus = function(cmd_args)
   end)
 end
 
+-- Start Claude, optionally with its process cwd in `dir`. claudecode.nvim
+-- manages a single terminal and reuses it wherever it already runs, so another
+-- tree can only be opened once the first is gone.
+launch_claude = function(cmd_args, dir)
+  if dir then
+    if any_claude_terminal() then
+      vim.notify(
+        'A Claude session is already running -- close it with <leader>ax to start one in another worktree.',
+        vim.log.levels.WARN
+      )
+      return
+    end
+    worktree_cwd = dir
+  end
+  show_no_focus(cmd_args)
+end
+
 local function toggle_no_focus(cmd_args)
   if claude_win() then
     require('claudecode.terminal').simple_toggle()
@@ -1389,7 +1613,15 @@ return {
         end,
         desc = 'session_continue',
       },
-      { '<leader>af', pick_claude_session, desc = 'find_session' },
+      {
+        '<leader>af',
+        function()
+          pick_claude_session()
+        end,
+        desc = 'find_session',
+      },
+      { '<leader>aw', continue_in_worktree, desc = 'worktree_continue' },
+      { '<leader>aW', pick_worktree_session, desc = 'worktree_session' },
       { '<leader>aF', '<cmd>ClaudeCode --resume<cr>', desc = 'find_session_cmd' },
 
       { '<leader>ay', '<cmd>ClaudeCodeDiffAccept<cr>', desc = 'diff_accept' },
@@ -1403,6 +1635,14 @@ return {
         ---@diagnostic disable-next-line: missing-fields
         terminal = {
           split_width_percentage = 0.45,
+          -- Where the Claude process starts: the worktree maps park a path in
+          -- worktree_cwd, read once so later launches are nvim's cwd again. Must
+          -- be here -- build_config drops per-call overrides that default to nil.
+          cwd_provider = function()
+            local dir = worktree_cwd
+            worktree_cwd = nil
+            return dir
+          end,
         },
       }
 

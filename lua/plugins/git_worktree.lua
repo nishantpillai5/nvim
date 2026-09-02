@@ -3,11 +3,16 @@
 -- `_G.worktree_symlinks`, `_G.worktree_create_callback` and
 -- `_G.worktree_from_branch` are project-local exrc knobs.
 
--- Run git and return ok plus trimmed stdout. Replaces the
--- vim.fn.system + vim.v.shell_error pairs the old config used throughout.
+-- Run git and return ok, trimmed stdout, and git's own stderr -- without that
+-- last one a failure here can only be reported as "it failed".
 local function git_out(args)
   local res = vim.system(vim.list_extend({ 'git' }, args), { text = true }):wait()
-  return res.code == 0, vim.trim(res.stdout or '')
+  return res.code == 0, vim.trim(res.stdout or ''), vim.trim(res.stderr or '')
+end
+
+-- Append git's complaint to our own message when it said anything.
+local function with_stderr(msg, err)
+  return (err and err ~= '') and (msg .. ':\n' .. err) or msg
 end
 
 local function git_lines(args)
@@ -42,37 +47,10 @@ local function worktree_dest(root, name)
   return vim.fs.joinpath(root, '.claude', 'worktrees', name)
 end
 
--- Worktree records from `--porcelain`, which is the only safely parseable form:
--- plain `git worktree list` separates its columns with whitespace, so any path
--- containing a space gets truncated. Records are delimited by the next
--- `worktree` line, so this does not depend on the blank separators git_lines
--- strips.
+-- Worktree records for the repo `cwd` is in; nil when that is not a repo. The
+-- parsing lives in util.git so the Claude worktree maps read the same records.
 local function worktree_records(cwd)
-  local ok, lines = git_lines { '-C', cwd, 'worktree', 'list', '--porcelain' }
-  if not ok then
-    return nil
-  end
-
-  local records, cur = {}, nil
-  for _, line in ipairs(lines) do
-    local path = line:match '^worktree (.+)$'
-    if path then
-      cur = { path = path }
-      table.insert(records, cur)
-    elseif cur then
-      if line == 'bare' then
-        cur.bare = true
-      elseif line == 'detached' then
-        cur.detached = true
-      else
-        local branch = line:match '^branch (.+)$'
-        if branch then
-          cur.branch = (branch:gsub('^refs/heads/', ''))
-        end
-      end
-    end
-  end
-  return records
+  return require('util.git').worktrees(cwd)
 end
 
 -- The repo's primary working tree: the first non-bare entry git reports.
@@ -84,6 +62,18 @@ local function main_worktree(cwd)
   for _, r in ipairs(records) do
     if not r.bare then
       return r.path
+    end
+  end
+  return nil
+end
+
+-- git's lock reason for `path`, or nil when it is not locked. Claude Code locks
+-- the worktree a session runs in, which is the usual reason one here is.
+local function worktree_lock(cwd, path)
+  local real = vim.uv.fs_realpath(path) or path
+  for _, r in ipairs(worktree_records(cwd) or {}) do
+    if (vim.uv.fs_realpath(r.path) or r.path) == real then
+      return r.locked
     end
   end
   return nil
@@ -145,7 +135,11 @@ local function delete_worktree()
   for _, r in ipairs(records) do
     if not r.bare then
       local suffix = (r.branch and ('  [' .. r.branch .. ']')) or (r.detached and '  [detached]') or ''
-      table.insert(items, { path = r.path, label = r.path .. suffix })
+      table.insert(items, {
+        path = r.path,
+        locked = r.locked,
+        label = r.path .. suffix .. (r.locked and '  (locked)' or ''),
+      })
     end
   end
   if #items == 0 then
@@ -161,6 +155,20 @@ local function delete_worktree()
   }, function(choice)
     if not choice then
       return
+    end
+    -- git refuses a locked worktree, and the plugin's callback carries no reason.
+    if choice.locked then
+      local reason = type(choice.locked) == 'string' and choice.locked or 'no reason given'
+      if
+        vim.fn.confirm(('This worktree is locked:\n  %s\n\nUnlock and delete it?'):format(reason), '&Yes\n&No', 2) ~= 1
+      then
+        return
+      end
+      local ok_unlock, _, unlock_err = git_out { '-C', root, 'worktree', 'unlock', choice.path }
+      if not ok_unlock then
+        vim.notify(with_stderr('Failed to unlock the worktree', unlock_err), vim.log.levels.ERROR)
+        return
+      end
     end
     require('git-worktree').delete_worktree(choice.path, false, {
       on_success = function()
@@ -262,6 +270,17 @@ local function move_worktree_to_repo()
   end
 
   local prompt = ('Move worktree "%s" (branch %s) onto\n%s ?'):format(vim.fn.fnamemodify(cur, ':t'), branch, main)
+
+  -- `worktree remove --force` refuses a locked tree (git wants --force twice),
+  -- so unlock as part of the move. Named in the prompt because a live session's
+  -- lock and one left behind by a crashed session look identical.
+  local lock = worktree_lock(cur, cur)
+  if lock then
+    prompt = prompt
+      .. '\n\nThis worktree is locked and will be unlocked first:\n  '
+      .. (type(lock) == 'string' and lock or 'no reason given')
+  end
+
   local ignored = ignored_paths(cur)
   if #ignored > 0 then
     local shown = vim.list_slice(ignored, 1, math.min(#ignored, 8))
@@ -276,6 +295,14 @@ local function move_worktree_to_repo()
   local choice = vim.fn.confirm(prompt, '&Yes\n&No', 2)
   if choice ~= 1 then
     return
+  end
+
+  if lock then
+    local ok_unlock, _, unlock_err = git_out { '-C', main, 'worktree', 'unlock', cur }
+    if not ok_unlock then
+      vim.notify(with_stderr('Failed to unlock the worktree', unlock_err), vim.log.levels.ERROR)
+      return
+    end
   end
 
   -- Preserve uncommitted work (tracked + untracked) in the stash, which lives in
@@ -294,13 +321,22 @@ local function move_worktree_to_repo()
   -- Step out of the worktree before removing it so nvim's cwd isn't inside it.
   vim.cmd.cd(vim.fn.fnameescape(main))
 
-  if not (git_out { '-C', main, 'worktree', 'remove', '--force', cur }) then
-    vim.notify('Failed to remove worktree; `git stash pop` in it to recover changes', vim.log.levels.ERROR)
+  local ok_rm, _, rm_err = git_out { '-C', main, 'worktree', 'remove', '--force', cur }
+  if not ok_rm then
+    local msg = with_stderr('Failed to remove worktree', rm_err)
+    if stashed then
+      msg = msg .. '\nYour changes are stashed — `git stash pop` in the worktree to recover them.'
+    end
+    vim.notify(msg, vim.log.levels.ERROR)
     return
   end
 
-  if not (git_out { '-C', main, 'checkout', branch }) then
-    vim.notify('Worktree removed but `git checkout ' .. branch .. '` failed in ' .. main, vim.log.levels.ERROR)
+  local ok_co, _, co_err = git_out { '-C', main, 'checkout', branch }
+  if not ok_co then
+    vim.notify(
+      with_stderr('Worktree removed but `git checkout ' .. branch .. '` failed in ' .. main, co_err),
+      vim.log.levels.ERROR
+    )
     return
   end
 

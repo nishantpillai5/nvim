@@ -101,6 +101,44 @@ function M.fork_point(branch)
   return M.merge_base(branch)
 end
 
+-- Every working tree of the repo containing `dir`, git's order (primary first),
+-- as `{ path, branch?, bare?, detached?, locked? }`; `locked` is git's reason
+-- string, or true when it was locked without one. nil outside a repo.
+-- `--porcelain` because plain `worktree list` separates its columns with
+-- whitespace, truncating any path that contains a space.
+function M.worktrees(dir)
+  local res = vim.system({ 'git', '-C', dir, 'worktree', 'list', '--porcelain' }, { text = true }):wait()
+  if res.code ~= 0 then
+    return nil
+  end
+
+  local records, cur = {}, nil
+  for line in (res.stdout or ''):gmatch '[^\r\n]+' do
+    local path = line:match '^worktree (.+)$'
+    if path then
+      cur = { path = path }
+      table.insert(records, cur)
+    elseif cur then
+      if line == 'bare' then
+        cur.bare = true
+      elseif line == 'detached' then
+        cur.detached = true
+      elseif line == 'locked' then
+        cur.locked = true
+      else
+        local branch = line:match '^branch (.+)$'
+        local reason = line:match '^locked (.+)$'
+        if branch then
+          cur.branch = (branch:gsub('^refs/heads/', ''))
+        elseif reason then
+          cur.locked = reason
+        end
+      end
+    end
+  end
+  return records
+end
+
 -- Statusline-safe repo facts, read off disk rather than shelled out, and cached
 -- because these run on every redraw -- many times a second. The TTL is the whole
 -- invalidation story on purpose: a branch can change from outside nvim, so no
