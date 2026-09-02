@@ -1,6 +1,7 @@
--- Oh My Pi (`omp`) as an alternative to claudecode.nvim, on <leader>c instead of
--- <leader>a. Both can be enabled at once; they run separate agents in separate
--- terminals and share nothing.
+-- Oh My Pi (`omp`) as one of the AI backends behind <leader>a -- <leader>ab
+-- cycles which, and the tabline says which is live. Both backends can be enabled
+-- at once; they run separate agents in separate terminals and share nothing but
+-- the keymaps. See util/ai/init.lua.
 --
 -- The plugin itself is only a context bridge: it follows the cursor and pushes
 -- "<file>:<line>" -- or "<file>:<start>-<end>" while a visual selection is
@@ -9,8 +10,9 @@
 -- attach-selection key here because there is nothing to attach by hand: just
 -- ask about "this function" and OMP already has the path and the lines.
 --
--- Everything else below is ours. OMP is a plain TUI, so the panel it runs in and
--- getting a prompt into it are this file's job, not the plugin's.
+-- Everything else below is ours. OMP is a plain TUI, so the panel it runs in is
+-- this file's job, not the plugin's; composing a prompt to send into it belongs
+-- to the shared box in util/ai/prompt.lua.
 
 local ID = 99 -- toggleterm slot, well clear of the numbered terminals <leader>o; cycles
 local WIDTH = 0.45 -- share of the columns the panel takes, matching the Claude panel
@@ -162,21 +164,66 @@ local function sender(keys)
   end
 end
 
-local function prompt()
-  local text = vim.fn.input 'omp: '
-  if vim.trim(text) == '' then
-    return
-  end
-  -- A running TUI reads the line off its pty; CR submits it, "\n" does not.
-  local t = alive()
-  if t and send_raw(text .. '\r') then
-    show(t)
-  else
-    -- Nothing to write to: hand the text to omp as its opening message instead
-    -- of racing the TUI's startup with a write it is not yet reading.
-    start(vim.fn.shellescape(text))
-  end
-end
+-- OMP's half of the shared <leader>a contract. Every key is declared once in
+-- core/keymaps.lua and resolves the active backend at press time -- there is no
+-- <leader>c group any more, so nothing here can fire at OMP while the tabline
+-- says Claude.
+--
+-- Registered at file-body level, which core/lazy.lua runs for every module under
+-- lua/plugins/ while collecting specs. See the AI section of README.md.
+require('util.ai').register('omp', {
+  send_raw = send_raw,
+  term_buf = function()
+    local t = alive()
+    return t and t.bufnr
+  end,
+  show = function()
+    local t = alive()
+    if t then
+      show(t)
+    else
+      start()
+    end
+  end,
+  -- No bracketed paste here, so a raw newline would submit each line as its own
+  -- turn: flatten a multi-line prompt to one line instead. This is the one thing
+  -- the shared box gives up on OMP -- everything else in it works the same as
+  -- for Claude.
+  submit = function(text)
+    return send_raw((text:gsub('%s*\r?\n%s*', ' ')) .. '\r')
+  end,
+  -- OMP has no nvim-side session picker, so both session keys point at its own
+  -- in-TUI one. Focused, unlike everything else here: the picker is inside the
+  -- TUI, so you have to be in it to use it.
+  find_session = function()
+    start('--resume', true)
+  end,
+  find_session_cli = function()
+    start('--resume', true)
+  end,
+  health = function()
+    vim.cmd 'checkhealth omp'
+  end,
+  -- Deliberately absent: scrape_suggestion, scrape_question, slash_commands,
+  -- mention, attach_*, worktree_* and diff_*. The first two would otherwise read
+  -- Claude's terminal; the command list would offer Claude's commands; there is
+  -- nothing to attach or mention by hand because the omp.nvim bridge is already
+  -- pushing the cursor's file and line; and there is no diff protocol here.
+  -- util.ai.call reports each of these rather than doing nothing.
+  toggle = toggle,
+  continue = function()
+    start '--continue'
+  end,
+  kill = kill,
+  accept = sender '\r',
+  reject = sender '\27',
+  interrupt = sender '`',
+  next_tab = sender '\t',
+  -- Shift+Tab: cycles reasoning effort here, permission mode in Claude.
+  cycle_mode = sender '\27[Z',
+  -- app.model.select is alt+m, which terminals send as ESC then the letter.
+  model = sender '\27m',
+})
 
 return {
   {
@@ -189,49 +236,12 @@ return {
     -- installed into ~/.omp rather than here -- this keeps the two halves in
     -- step on install and update. Drop it if you'd rather install by hand.
     build = 'omp plugin install omp.nvim',
-    -- Letter for letter with claudecode.nvim's <leader>a set, so both agents
-    -- drive the same. Claude's prompt and answer keys are global (<leader><leader>,
-    -- <leader>j, <leader>k) and it owns those, so their counterparts sit in this
-    -- group. Claude's diff keys have no OMP equivalent -- there is no diff
-    -- protocol here -- and its attach keys are unnecessary; see the note above.
-    keys = {
-      { '<leader>cc', toggle, mode = { 'n', 'v' }, desc = 'toggle' },
-      { '<leader>cp', prompt, mode = { 'n', 'v' }, desc = 'prompt' },
-
-      -- Answer OMP's dialogs from wherever you are: <CR> takes the highlighted
-      -- option, <Esc> cancels the dialog -- it no longer interrupts the turn,
-      -- app.interrupt having been rebound to ` in the omp config.
-      { '<leader>cj', sender '\r', mode = { 'n', 'v' }, desc = 'accept_prompt' },
-      { '<leader>ck', sender '\27', mode = { 'n', 'v' }, desc = 'reject_prompt' },
-      { '<leader>cl', sender '`', mode = { 'n', 'v' }, desc = 'interrupt' },
-      -- Next option in a dialog; the answer keys above then act on whatever is
-      -- highlighted by the time you press them.
-      { '<leader>c;', sender '\t', mode = { 'n', 'v' }, desc = 'next_question' },
-      -- Shift+Tab is the terminal back-tab sequence: ESC [ Z, which OMP's input
-      -- layer matches literally. It cycles reasoning effort, where the same key
-      -- cycles permission mode in Claude.
-      { '<leader>cm', sender '\27[Z', mode = { 'n', 'v' }, desc = 'cycle_effort' },
-      -- app.model.select is alt+m, which terminals send as ESC then the letter.
-      { '<leader>cM', sender '\27m', mode = { 'n', 'v' }, desc = 'model' },
-
-      { '<leader>cx', kill, mode = { 'n', 'v' }, desc = 'kill' },
-
-      {
-        '<leader>cs',
-        function()
-          start '--continue'
-        end,
-        desc = 'session_continue',
-      },
-      {
-        '<leader>cf',
-        function()
-          start('--resume', true)
-        end,
-        desc = 'find_session',
-      },
-      { '<leader>ch', '<cmd>checkhealth omp<cr>', desc = 'health' },
-    },
+    -- No `keys`: every mapping is declared in core/keymaps.lua and dispatched
+    -- through util.ai. The <leader>c group this file used to own is retired --
+    -- it drove OMP regardless of which backend was active, which is exactly the
+    -- confusion the indicator exists to remove. `event = 'VeryLazy'` above is
+    -- what loads this now, and it has to stay eager anyway: the cursor bridge
+    -- must be tracking before a session starts, not from the first keypress.
     config = function()
       require('omp').setup()
     end,

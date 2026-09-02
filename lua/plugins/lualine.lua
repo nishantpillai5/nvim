@@ -291,11 +291,28 @@ return {
               return package.loaded['neoscopes'] ~= nil
             end,
           },
-          -- Whisper: the dictation mic, plus the buffer transcribed words are
-          -- landing in while any are. See util/whisper.lua.
+          -- Whisper: the pulse, then the buffer transcribed words are landing
+          -- in, while any are. The mic that goes with it is the component after
+          -- the backend label below. See util/whisper.lua.
           {
             function()
               return require('util.whisper').status()
+            end,
+          },
+          -- The AI backend <leader>a sends to (cycled with <leader>ab), then the
+          -- dictation mic: together they say where a dictated prompt would land,
+          -- so they are one component rather than two adjacent ones. lualine pads
+          -- every non-empty component on both sides, which would read as two
+          -- spaces between them. See util/ai/init.lua and util/whisper.lua.
+          {
+            function()
+              local parts = { require('util.ai').status() }
+              -- Empty whenever whisper isn't in the config -- no trailing space.
+              local mic = require('util.whisper').mic()
+              if mic ~= '' then
+                parts[#parts + 1] = mic
+              end
+              return table.concat(parts, ' ')
             end,
           },
         },

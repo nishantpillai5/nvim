@@ -1,5 +1,5 @@
 -- Speech to text via whisper.cpp. <leader>nd comes from `keybind`; the lazy key
--- is only a stub. <leader>ad arms dictation into Claude's prompt box.
+-- is only a stub. <leader>ad arms dictation into the agent prompt box.
 --
 -- Arming does not start whisper-stream: in VAD mode it holds the mic open and
 -- runs large-v3 over the trailing window every time it hears anything at all
@@ -25,7 +25,7 @@ local HALLUCINATED = {
   bye = true,
 }
 
--- Long enough to span a Claude turn, short enough that walking away closes the
+-- Long enough to span an agent turn, short enough that walking away closes the
 -- mic. It only buys back ~0.5s of load, so erring long costs more.
 local IDLE_MS = 120000
 
@@ -180,7 +180,7 @@ end
 -- box has to still be the buffer whisper has been writing into.
 local function send_prompt()
   local buf = vim.api.nvim_get_current_buf()
-  if not (vim.g.whisper_dictating and vim.b[buf].claude_prompt) then
+  if not (vim.g.whisper_dictating and vim.b[buf].ai_prompt) then
     return false
   end
   local map = vim.fn.maparg('<CR>', 'i', false, true)
@@ -202,7 +202,7 @@ local function auto_dictate(bufnr)
     vim.b[bufnr].whisper_auto_dictate = true
     vim.api.nvim_create_autocmd({ 'BufLeave', 'BufWipeout' }, {
       buffer = bufnr,
-      desc = 'stop dictating when the Claude prompt box loses focus',
+      desc = 'stop dictating when the agent prompt box loses focus',
       callback = detach,
     })
   end
@@ -232,18 +232,18 @@ return {
           vim.g.whisper_auto_dictate = false
           vim.g.whisper_dictating = false
           stop_stream()
-          vim.notify 'Claude dictation off'
+          vim.notify 'Agent dictation off'
         elseif model_ready() then
           vim.g.whisper_auto_dictate = true
-          vim.notify 'Claude dictation on'
+          vim.notify 'Agent dictation on'
         end
       end, { desc = 'dictation_toggle' })
 
       vim.api.nvim_create_autocmd('InsertEnter', {
-        group = vim.api.nvim_create_augroup('whisper_claude_prompt', { clear = true }),
-        desc = 'dictate into the Claude prompt box',
+        group = vim.api.nvim_create_augroup('whisper_ai_prompt', { clear = true }),
+        desc = 'dictate into the agent prompt box',
         callback = function(args)
-          if vim.b[args.buf].claude_prompt and vim.g.whisper_auto_dictate then
+          if vim.b[args.buf].ai_prompt and vim.g.whisper_auto_dictate then
             auto_dictate(args.buf)
           end
         end,
@@ -255,7 +255,7 @@ return {
       keybind = '<leader>nd',
       -- Buffer-local while a recording is live, so it shadows llama.vim's global
       -- <Tab> accept-line (llama.lua) for that stretch and restores itself on
-      -- stop. Harmless in practice -- the Claude path rebinds to <C-g> anyway --
+      -- stop. Harmless in practice -- the prompt-box path rebinds to <C-g> anyway --
       -- but that is why <Tab> stops accepting FIM ghost text mid-dictation.
       manual_trigger_key = '<Tab>',
       -- Also strips VAD mode's [timestamp] prefixes, so it is load-bearing.
@@ -282,7 +282,7 @@ return {
       ---@diagnostic disable-next-line: duplicate-set-field
       audio.insert_streaming_text = function(text)
         local fresh = drop_overlap(text or '')
-        -- Only the Claude path listens for the submit word; plain <leader>nd
+        -- Only the prompt-box path listens for the submit word; plain <leader>nd
         -- dictation into a file keeps every word it hears.
         local spoken, heard = fresh, false
         if vim.g.whisper_dictating then

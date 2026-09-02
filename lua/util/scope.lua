@@ -88,9 +88,14 @@ function M.constrain(opts)
   return opts, glob_args, search_dirs
 end
 
--- Name for the lualine indicator.
+-- Name for the lualine indicator, and empty when no scope is selected. It used
+-- to fall back to a circle-slash glyph, which reads as "scoping is off" --
+-- a claim on the statusline where there is nothing to say. lualine draws an
+-- empty component as nothing at all, padding included, so '' hides the
+-- component rather than leaving a hole.
 function M.status()
-  return M.icon .. (M.name() or '')
+  local name = M.name()
+  return name and (M.icon .. name) or ''
 end
 
 function M.select()

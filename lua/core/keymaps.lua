@@ -21,6 +21,69 @@ map('n', '<leader>zw', ':set wrap!<cr>', { desc = 'wrap' })
 map('n', '<leader>zq', ':set lazyredraw!<cr>', { desc = 'lazyredraw_toggle' })
 map('n', '<leader>z/', ':nohlsearch<cr>', { desc = 'clear_search' })
 
+-- <leader>a drives whichever AI backend is active: <leader>ab cycles it
+-- (skipping any whose CLI isn't installed) and the tabline indicator says which
+-- one is live. The operations themselves are registered by
+-- plugins/claudecode.lua and plugins/omp.lua -- this only names the keys, so a
+-- backend that can't do one of them says so instead of failing silently. The
+-- keys live here rather than in either plugin's `keys` list because two specs
+-- cannot both claim <leader>aa; util.ai loads the right plugin on first use.
+-- See util/ai/init.lua and the AI section of README.md.
+map({ 'n', 'v' }, '<leader>ab', function()
+  require('util.ai').cycle()
+end, { desc = 'backend_cycle' })
+
+-- The prompt box, and the answer menu when the backend can see a question on
+-- screen. Lives in util/ai/prompt.lua, which is backend-agnostic.
+map({ 'n', 'v' }, '<leader><leader>', function()
+  require('util.ai.prompt').open()
+end, { desc = 'prompt' })
+
+for _, entry in ipairs {
+  { '<leader>aa', 'toggle', 'toggle' },
+  { '<leader>j', 'accept', 'accept_prompt' },
+  { '<leader>k', 'reject', 'reject_prompt' },
+  { '<leader>al', 'interrupt', 'interrupt' },
+  { '<leader>a;', 'next_tab', 'next_question' },
+  { '<leader>am', 'cycle_mode', 'cycle_mode' },
+  { '<leader>aM', 'model', 'model' },
+  { '<leader>ax', 'kill', 'kill' },
+  { '<leader>as', 'continue', 'session_continue' },
+  { '<leader>aV', 'attach_buffer', 'attach_buffer' },
+  { '<leader>af', 'find_session', 'find_session' },
+  { '<leader>aF', 'find_session_cli', 'find_session_cli' },
+  { '<leader>aw', 'worktree_continue', 'worktree_continue' },
+  { '<leader>aW', 'worktree_session', 'worktree_session' },
+  { '<leader>ay', 'diff_accept', 'diff_accept' },
+  { '<leader>an', 'diff_reject', 'diff_reject' },
+  { '<leader>ah', 'health', 'health' },
+} do
+  local lhs, op, desc = entry[1], entry[2], entry[3]
+  map({ 'n', 'v' }, lhs, function()
+    require('util.ai').call(op)
+  end, { desc = desc })
+end
+
+-- <leader>av attaches what you are looking at, and what that means depends on
+-- where you are: a visual selection anywhere, or the entry under the cursor in a
+-- file tree. Two separate maps rather than one op that inspects the mode, so the
+-- key simply does not exist in normal mode in an ordinary buffer -- which is how
+-- it behaved when claudecode.nvim's own `keys` spec scoped it with `ft`.
+map('v', '<leader>av', function()
+  require('util.ai').call 'attach_visual'
+end, { desc = 'attach_visual' })
+
+vim.api.nvim_create_autocmd('FileType', {
+  group = vim.api.nvim_create_augroup('ai_attach_tree', { clear = true }),
+  pattern = { 'NvimTree', 'neo-tree', 'oil', 'minifiles', 'netrw' },
+  desc = 'attach the tree entry under the cursor to the active AI backend',
+  callback = function()
+    map('n', '<leader>av', function()
+      require('util.ai').call 'attach_tree'
+    end, { buffer = true, desc = 'attach_file' })
+  end,
+})
+
 -- Keep the cursor centered while navigating
 map('n', '<C-d>', '<C-d>zz', { desc = 'page_down' })
 map('n', '<C-u>', '<C-u>zz', { desc = 'page_up' })

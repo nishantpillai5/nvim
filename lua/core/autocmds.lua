@@ -58,11 +58,13 @@ vim.api.nvim_create_autocmd('BufEnter', {
       if vim.bo.buftype ~= 'terminal' then
         return
       end
-      -- The term:// name is "term://{cwd}//{pid}:{command}"; test the command
-      -- part only, so a plain shell opened inside a .claude/ dir isn't matched.
-      local name = vim.api.nvim_buf_get_name(0)
-      if (name:match ':([^:]*)$' or name):find('claude', 1, true) then
-        return -- Claude's terminal is managed by plugins/claudecode.lua
+      -- Agent terminals manage their own insert and scroll behaviour --
+      -- claudecode.lua pins unfocused windows to the newest output, omp.lua
+      -- keeps its panel readable -- so leave them alone. util.ai matches on the
+      -- command's basename rather than a substring, which is what keeps `omp`
+      -- from matching docker-compose.
+      if require('util.ai').is_agent_terminal(0) then
+        return
       end
       vim.cmd.stopinsert()
       local line_count = vim.api.nvim_buf_line_count(0)

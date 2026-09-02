@@ -212,13 +212,29 @@ manager uses.
 
 ## AI
 
-`plugins/claudecode.lua` is the largest file here. Most of it is the prompt box
-you pop over the current file with `<leader><leader>`: it composes a message,
-completes `@file` paths and slash commands, previews Claude's suggested reply,
-and can answer an AskUserQuestion prompt by option key -- all without focusing
-the terminal.
+`<leader>a` drives whichever AI backend is active -- Claude Code or OMP.
+`<leader>ab` cycles it and the tabline indicator says which is live. The keys are
+declared once in `core/keymaps.lua` and dispatch through `util/ai/init.lua`, so a
+key can never fire at one agent while the indicator names the other; neither
+plugin spec declares a mapping of its own. Switching changes only where keys are
+sent -- it shows, hides and moves no panel, and both can be open at once.
 
-Its `@file` / `/command` completion drove nvim-cmp in the old config. nvim-cmp
+Backends publish an op table with `register`. `call` runs an op and warns when a
+backend lacks it; `try` runs it and returns nil. Which one a caller uses is the
+contract: `call` for what every backend must do, `try` for what only some can.
+Both TUI scrapers are reached with `try`, because they read a *terminal* -- a
+backend that inherited another's would draw its ghost text from Claude's input
+box and answer Claude's pending question with OMP's keystrokes.
+
+`util/ai/prompt.lua` is the prompt box you pop over the current file with
+`<leader><leader>`: it composes a message, completes `@file` paths and slash
+commands, previews the backend's suggested reply, and can answer a structured
+question by option key -- all without focusing the terminal. What stays in
+`plugins/claudecode.lua` is Claude's alone: its two TUI scrapers, the session
+picker and transcript previewer over `~/.claude/projects`, worktree launching,
+and the MCP diff protocol.
+
+The box's `@file` / `/command` completion drove nvim-cmp in the old config. nvim-cmp
 isn't part of this config, so it drives Neovim's built-in popup menu through
 `vim.fn.complete()` instead. The menu opens as you type inside an `@path` or a
 leading `/command`; `<C-n>` also opens it (and advances it), `<C-p>` and
@@ -250,13 +266,44 @@ Two settings elsewhere exist only to keep that menu off the box:
   completion everywhere else keeps the taller menu. Below about 20 rows Neovim
   flips it regardless; that one is not ours to fix.
 
-`core/autocmds.lua`'s terminal autoscroll skips Claude's terminal, which
-`plugins/claudecode.lua` manages itself (jk to leave insert, `<C-h/j/k/l>` split
-navigation, autoscroll for unfocused windows, and quitting Neovim when only the
-Claude terminal is left and nothing is unsaved).
+`core/autocmds.lua`'s terminal autoscroll skips agent terminals, which their own
+plugins manage instead (jk to leave insert, `<C-h/j/k/l>` split navigation,
+autoscroll for unfocused windows, and quitting Neovim when only Claude's terminal
+is left and nothing is unsaved). `util.ai.is_agent_terminal` matches on the
+command's basename rather than a substring, so `docker-compose` is not mistaken
+for `omp`, nor a shell opened in a `.claude/` directory for `claude`.
 
 The `llama_hl_fim_hint` highlight lives in `plugins/llama.lua` rather than
 core, since it only matters when llama.vim is enabled.
+
+### Remaining work
+
+All of it is OMP reaching parity with Claude; none of it blocks anything else.
+
+- **Ghost suggestion** and **question menu** (`scrape_suggestion`,
+  `scrape_question`) need OMP's TUI layout. Only the scrapers are new -- the
+  Telescope menu, the option shape and the spaced-out number-key presses are
+  already generic in `util/ai/prompt.lua`.
+- **Session picker** (`find_session`) is `omp --resume` today, OMP's own in-TUI
+  picker. One like Claude's needs OMP's session store: where it is, what format,
+  whether it is keyed by project path. Parity now also means rendering its
+  transcript records, not just listing sessions.
+- **Worktree launch** (`worktree_continue`, `worktree_session`) is easier than
+  Claude's: `omp.lua` builds its own toggleterm terminal, which takes a `dir`, so
+  no `cwd_provider` dance. The session half depends on the picker above.
+- **`/command` completion** (`slash_commands`) needs OMP's command and skill
+  directories. The `@file` half already works for both backends.
+- **Diff accept/reject** stays Claude-only -- it is claudecode.nvim's MCP diff
+  protocol, and omp.nvim is a context bridge with no equivalent.
+- **The attach keys** want no OMP counterpart: its bridge already pushes the
+  cursor's file and line over a socket, so there is nothing to attach by hand.
+
+Two unknowns gate the first four, and both are answered by looking at what `omp`
+writes to disk: where it stores sessions, and where its slash-commands live.
+
+Still undecided: whether the active backend should survive a restart (it is
+in-memory, so every session starts on Claude), and whether `<leader>ab` should
+become a picker rather than a cycle if a third backend ever lands.
 
 ## Containers
 

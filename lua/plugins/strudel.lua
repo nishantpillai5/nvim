@@ -8,8 +8,8 @@ local STR_FILES = { '*.str', '*.std' }
 local BUFFER_KEYS = {
   { '<leader>;q', 'quit', 'quit' },
   { '<leader>;x', 'toggle', 'toggle' },
-  -- Not <leader><leader>: buffer-local always beats global, and that is
-  -- claudecode.lua's prompt/answer key.
+  -- Not <leader><leader>: buffer-local always beats global, and that is the
+  -- shared agent prompt/answer key (core/keymaps.lua).
   { '<leader>;u', 'update', 'update' },
   { '<leader>;X', 'stop', 'stop' },
   { '<leader>;s', 'set_buffer', 'buffer' },

@@ -1,4 +1,4 @@
--- The spoken word that ends dictation and sends the Claude prompt box, wired up
+-- The spoken word that ends dictation and sends the agent prompt box, wired up
 -- in plugins/whisper.lua. It has to survive whisper's own transcription and
 -- never turn up by accident, so it is a multi-syllable dictionary noun with no
 -- near neighbours in speech about code: three syllables give large-v3 enough

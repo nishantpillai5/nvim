@@ -1,13 +1,17 @@
--- The whisper indicator for lualine, as one component: `filename pulse mic`. The
--- mic says whether Claude's prompt box is armed (<leader>ad in
--- plugins/whisper.lua) -- armed, not listening. The filename and the pulse show
--- up only while words are landing, and name the buffer they land in.
+-- The whisper indicators for lualine, as two components. M.status is
+-- `pulse filename`: it shows up only while words are landing, and names the
+-- buffer they land in. M.mic says whether the agent prompt box is armed
+-- (<leader>ad in plugins/whisper.lua) -- armed, not listening -- and sits after
+-- the AI backend label instead, since between them they say where a dictated
+-- prompt would go.
 local M = {}
 
 local MIC, MIC_OFF = '󰍬', '󰍭'
 
--- A breathing wave rather than a spinner, so it reads as a level next to the
--- static mic. The frame comes off the clock, so the speed is refresh-independent.
+-- A breathing wave rather than a spinner: it reads as a level rather than a
+-- busy indicator. It leads the component -- the mic it used to sit beside now
+-- lives after the backend label. The frame comes off the clock, so the speed is
+-- refresh-independent.
 local FRAMES = { '󰕿', '󰖀', '󰕾', '󰖀' }
 -- Also the rate the whole tabline recomputes at while transcribing.
 local PULSE_MS = 500
@@ -114,7 +118,7 @@ end
 
 -- A nil flag means whisper is not in this config at all, the one case that
 -- renders nothing.
-local function mic()
+function M.mic()
   if vim.g.whisper_auto_dictate == nil then
     return ''
   elseif not vim.g.whisper_auto_dictate then
@@ -132,25 +136,19 @@ local function mic()
 end
 
 -- Also owns the pulse timer's lifetime, so the lualine spec needs nothing else.
+-- That ownership is why this component and not M.mic is the one that has to stay
+-- in the spec: M.mic can be moved anywhere, this cannot be dropped.
 function M.status()
-  local parts = {}
-
-  if M.is_writing() then
-    M.start()
-    local buf = target_buf()
-    local win, floating = window_for(buf)
-    local label = (floating and win and float_title(win)) or buf_label(buf)
-    parts[1] = (floating and (FLOAT_ICON .. ' ') or '') .. label
-    parts[2] = FRAMES[math.floor(vim.uv.now() / PULSE_MS) % #FRAMES + 1]
-  else
+  if not M.is_writing() then
     M.stop()
+    return ''
   end
-
-  local icon = mic()
-  if icon ~= '' then
-    table.insert(parts, icon)
-  end
-  return table.concat(parts, ' ')
+  M.start()
+  local buf = target_buf()
+  local win, floating = window_for(buf)
+  local label = (floating and win and float_title(win)) or buf_label(buf)
+  local name = (floating and (FLOAT_ICON .. ' ') or '') .. label
+  return FRAMES[math.floor(vim.uv.now() / PULSE_MS) % #FRAMES + 1] .. ' ' .. name
 end
 
 return M

@@ -16,9 +16,11 @@ return {
         spec = {
           { '<leader>', group = 'Leader' },
           { '<leader>;', group = 'Strudel' },
+          -- One group for every AI backend; <leader>ab switches which one the
+          -- group talks to. <leader>c is free -- it was OMP's, before the
+          -- dispatch made a second group redundant.
           { '<leader>a', group = 'Agent', mode = { 'n', 'v' } },
           { '<leader>b', group = 'Breakpoint' },
-          { '<leader>c', group = 'OMP', mode = { 'n', 'v' } },
           { '<leader>e', group = 'Explorer' },
           { '<leader>f', group = 'Find' },
           { '<leader>fb', group = 'Breakpoint' },
