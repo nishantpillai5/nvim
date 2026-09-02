@@ -199,123 +199,6 @@ local worktree_cwd
 -- the terminal with autoscroll too.
 local ensure_terminal_autoscroll
 
--- Session picker. Bare (<leader>af) it lists every project's sessions;
--- `opts.key` narrows that to one project key and `opts.cwd` is where Claude then
--- runs, which for a deleted worktree is the repo it was folded back into.
--- Sessions under another key are dimmed but still resumable: `claude --resume
--- <id>` falls back to scanning ~/.claude/projects for that id.
----@param opts { key: string?, cwd: string?, title: string?, allow_new: boolean? }?
-local function pick_claude_session(opts)
-  local pickers = require 'telescope.pickers'
-  local finders = require 'telescope.finders'
-  local conf = require('telescope.config').values
-  local actions = require 'telescope.actions'
-  local action_state = require 'telescope.actions.state'
-
-  opts = opts or {}
-  local path_map = build_path_map()
-  local sessions_base = vim.fn.expand '~/.claude/projects'
-  local run_cwd = opts.cwd
-  local home_key = encode_project(run_cwd or vim.fn.getcwd())
-  local entries = {}
-
-  for _, project_dir in ipairs(vim.fn.glob(sessions_base .. '/*', false, true)) do
-    local encoded_name = vim.fn.fnamemodify(project_dir, ':t')
-    local display_project = path_map[encoded_name] or encoded_name
-
-    if not opts.key or encoded_name == opts.key then
-      for _, session_file in ipairs(vim.fn.glob(project_dir .. '/*.jsonl', false, true)) do
-        table.insert(entries, {
-          session_id = vim.fn.fnamemodify(session_file, ':t:r'),
-          project = display_project,
-          summary = read_session_title(session_file),
-          mtime = vim.fn.getftime(session_file),
-          loadable = encoded_name == home_key,
-        })
-      end
-    end
-  end
-
-  table.sort(entries, function(a, b)
-    if a.loadable ~= b.loadable then
-      return a.loadable
-    end
-    return a.mtime > b.mtime
-  end)
-
-  -- After the sort, so it stays pinned above the sessions: a worktree nobody has
-  -- opened yet has none, and the picker would otherwise be a dead end.
-  if opts.allow_new then
-    local home = vim.fn.expand '~'
-    table.insert(entries, 1, {
-      new = true,
-      -- Telescope reads `value` off every entry, so keep it a string.
-      session_id = '',
-      summary = 'Start a new session',
-      project = ((run_cwd or vim.fn.getcwd()):gsub('^' .. vim.pesc(home), '~')),
-      mtime = 0,
-      loadable = true,
-    })
-  end
-
-  pickers
-    .new({}, {
-      prompt_title = opts.title or 'Claude Sessions',
-      finder = finders.new_table {
-        results = entries,
-        entry_maker = function(entry)
-          local make_display = function(e)
-            local title = e.summary ~= '' and e.summary or '(no message)'
-            local path_str = '  ' .. e.project
-            local time_str = e.new and '' or ('  ' .. relative_time(e.mtime))
-            local display = title .. path_str .. time_str
-            if not e.loadable then
-              return display, { { { 0, #display }, 'LspInlayHint' } }
-            end
-            return display,
-              {
-                { { #title, #title + #path_str }, 'Comment' },
-                { { #title + #path_str, #display }, 'Special' },
-              }
-          end
-          return {
-            value = entry.session_id,
-            display = make_display,
-            ordinal = entry.summary .. ' ' .. entry.project,
-            summary = entry.summary,
-            project = entry.project,
-            mtime = entry.mtime,
-            loadable = entry.loadable,
-            new = entry.new,
-          }
-        end,
-      },
-      sorter = conf.generic_sorter {},
-      attach_mappings = function(prompt_bufnr, map)
-        local function resume_session()
-          local selection = action_state.get_selected_entry()
-          if not selection then
-            return
-          end
-          actions.close(prompt_bufnr)
-          -- `cond and nil or x` is always x in Lua, so branch explicitly.
-          local cmd_args = nil
-          if not selection.new then
-            cmd_args = '--resume ' .. selection.value
-            if not selection.loadable then
-              vim.notify('Resuming a session from ' .. selection.project)
-            end
-          end
-          launch_claude(cmd_args, run_cwd)
-        end
-        map('i', '<CR>', resume_session)
-        map('n', '<CR>', resume_session)
-        return true
-      end,
-    })
-    :find()
-end
-
 -- Worktrees this repo no longer has, but whose sessions are still on disk:
 -- <leader>wwm and <leader>wwd remove the directory, the transcripts under
 -- ~/.claude/projects outlive it. Matched by key prefix, newest first -- the
@@ -347,6 +230,382 @@ local function orphaned_worktrees(root, live_keys)
     return a.mtime > b.mtime
   end)
   return items
+end
+
+-- Where a session's project sits relative to nvim's cwd. 'here' and 'worktree'
+-- share a rank -- both are this repo, and plain recency is the more useful order
+-- between them -- but they keep different path colours. Telescope's default
+-- strategy draws entry 1 at the bottom of the list, next to the prompt, so rank
+-- 1 is what you land on and the greyed-out rest of the world stacks above it.
+local ORIGIN_RANK = { here = 1, worktree = 1, other = 2 }
+
+-- Green for this directory, blue for another worktree of the same repo; the
+-- title stays default-white for both. An 'other' row is painted flat grey
+-- instead and never reaches this table.
+local ORIGIN_PATH_HL = { here = 'Comment', worktree = 'Directory' }
+
+-- The ~/.claude/projects keys belonging to a worktree of the repo nvim is in --
+-- the live ones git knows about, plus the removed ones whose transcripts
+-- outlived the directory. Outside a repo there are none, and the picker just
+-- falls back to here-vs-elsewhere.
+local function worktree_keys()
+  local records = require('util.git').worktrees(vim.uv.cwd() or '.')
+  if not records then
+    return {}
+  end
+  local keys, root = {}, nil
+  for _, r in ipairs(records) do
+    if not r.bare then
+      root = root or r.path -- git lists the primary working tree first
+      keys[encode_project(r.path)] = true
+    end
+  end
+  if root then
+    for _, item in ipairs(orphaned_worktrees(root, keys)) do
+      keys[item.key] = true
+    end
+  end
+  return keys
+end
+
+-- ---------------------------------------------------------------------------
+-- Session preview pane.
+--
+-- A transcript is the whole conversation and runs to megabytes, while the
+-- previewer re-fires on every cursor move -- so this never reads a file whole.
+-- It takes a tail just big enough to fill the preview window, and grows the bite
+-- only when a chunk turns out to be mostly tool payloads with little to show.
+-- ---------------------------------------------------------------------------
+
+local PREVIEW_TAIL_BYTES = 128 * 1024
+local PREVIEW_MAX_BYTES = 4 * 1024 * 1024
+
+-- How much of that tail is kept in the preview buffer. More than one windowful,
+-- so <C-u> scrolls back into real history rather than into blank lines, but
+-- still bounded -- the buffer is repainted on every cursor move in the list.
+local PREVIEW_MAX_ROWS = 500
+local preview_cache = {}
+
+-- The last `bytes` of a file, minus the partial line at the cut. Also reports
+-- whether the read reached back to the start, which is the signal to stop
+-- growing.
+local function read_tail(path, bytes)
+  local stat = vim.uv.fs_stat(path)
+  if not stat then
+    return nil
+  end
+  local f = io.open(path, 'r')
+  if not f then
+    return nil
+  end
+  local from = math.max(0, stat.size - bytes)
+  if from > 0 then
+    f:seek('set', from)
+  end
+  local chunk = f:read '*a' or ''
+  f:close()
+  if from > 0 then
+    -- Whatever precedes the first newline was cut mid-JSON; drop it.
+    chunk = chunk:match '\n(.*)$' or ''
+  end
+  return chunk, from == 0
+end
+
+-- Tool calls are shown as one line, so pick the one argument that says what the
+-- call was actually about -- the command, the file, the pattern.
+local TOOL_ARG_KEYS = { 'command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt' }
+
+local function tool_summary(block)
+  local name = block.name or 'tool'
+  local input = json_field(block, 'input')
+  if type(input) == 'table' then
+    for _, key in ipairs(TOOL_ARG_KEYS) do
+      local val = json_field(input, key)
+      if type(val) == 'string' and val ~= '' then
+        local arg = val:gsub('%s+', ' '):sub(1, 60)
+        return name .. '(' .. arg .. ')'
+      end
+    end
+  end
+  return name
+end
+
+-- One transcript record -> zero or more preview rows, appended to `rows`.
+-- Skipped: sidechains (a subagent's own turns, interleaved with the main
+-- thread), tool results (bulk, and the call above already says what ran), and
+-- thinking blocks.
+local function render_record(entry, rows)
+  if entry.type ~= 'user' and entry.type ~= 'assistant' then
+    return
+  end
+  if entry.isSidechain or entry.isMeta then
+    return
+  end
+  local content = json_field(json_field(entry, 'message'), 'content')
+  if type(content) == 'string' then
+    content = { { type = 'text', text = content } }
+  elseif type(content) ~= 'table' then
+    return
+  end
+  for _, block in ipairs(content) do
+    if type(block) == 'table' then
+      if block.type == 'text' and type(block.text) == 'string' then
+        if entry.type == 'user' then
+          -- extract_text also collapses a pasted wall of text to one line and
+          -- drops the local-command caveat blocks entirely.
+          local text = extract_text(block.text)
+          if text then
+            if #rows > 0 then
+              rows[#rows + 1] = { text = '', kind = 'gap' }
+            end
+            rows[#rows + 1] = { text = '❯ ' .. text, kind = 'user' }
+          end
+        else
+          for _, line in ipairs(vim.split(block.text, '\n')) do
+            rows[#rows + 1] = { text = line, kind = 'text' }
+          end
+        end
+      elseif block.type == 'tool_use' then
+        rows[#rows + 1] = { text = '⏺ ' .. tool_summary(block), kind = 'tool' }
+      end
+    end
+  end
+end
+
+-- Enough rows to fill a window `height` tall, newest last.
+local function session_preview_rows(path, height)
+  local stat = vim.uv.fs_stat(path)
+  local key = stat and (stat.mtime.sec .. ':' .. stat.size) or nil
+  local hit = preview_cache[path]
+  if key and hit and hit.key == key and (hit.complete or #hit.rows >= height) then
+    return hit.rows
+  end
+
+  local rows, complete, bytes = {}, false, PREVIEW_TAIL_BYTES
+  while true do
+    local chunk, whole = read_tail(path, bytes)
+    if not chunk then
+      return {}
+    end
+    rows, complete = {}, whole
+    for line in chunk:gmatch '[^\n]+' do
+      local ok, entry = pcall(vim.json.decode, line)
+      if ok and type(entry) == 'table' then
+        render_record(entry, rows)
+      end
+    end
+    if #rows >= height or whole or bytes >= PREVIEW_MAX_BYTES then
+      break
+    end
+    bytes = bytes * 4
+  end
+
+  if key then
+    preview_cache[path] = { key = key, rows = rows, complete = complete }
+  end
+  return rows
+end
+
+local preview_ns = vim.api.nvim_create_namespace 'claude_session_preview'
+
+local PREVIEW_HL = { user = 'Special', tool = 'Comment' }
+
+local function session_previewer()
+  local previewers = require 'telescope.previewers'
+  return previewers.new_buffer_previewer {
+    title = 'Session',
+    -- One buffer per transcript, reused as you move back and forth over the
+    -- list, instead of a new scratch buffer (and a new markdown parse) per move.
+    get_buffer_by_name = function(_, entry)
+      return entry.file
+    end,
+    define_preview = function(self, entry)
+      local bufnr, winid = self.state.bufnr, self.state.winid
+      local valid_win = winid and vim.api.nvim_win_is_valid(winid)
+      local height = valid_win and vim.api.nvim_win_get_height(winid) or 20
+
+      local lines, kinds = {}, {}
+      if entry.new or entry.file == '' then
+        lines = { 'Start a new Claude session in', '', '  ' .. entry.project }
+      else
+        local rows = session_preview_rows(entry.file, height)
+        -- Newest last, and deeper than the window is tall so there is something
+        -- to scroll back into.
+        for i = math.max(1, #rows - PREVIEW_MAX_ROWS + 1), #rows do
+          lines[#lines + 1] = rows[i].text
+          kinds[#kinds + 1] = rows[i].kind
+        end
+        if #lines == 0 then
+          lines = { '(nothing to show)' }
+        end
+      end
+
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+      vim.api.nvim_buf_clear_namespace(bufnr, preview_ns, 0, -1)
+      -- Markdown for the assistant's own formatting (fences, lists); extmarks on
+      -- top for the turn markers, which outrank treesitter on priority. Guarded
+      -- because setting it re-fires every FileType autocmd on a reused buffer.
+      if vim.bo[bufnr].filetype ~= 'markdown' then
+        vim.bo[bufnr].filetype = 'markdown'
+      end
+      for i, kind in ipairs(kinds) do
+        local hl = PREVIEW_HL[kind]
+        if hl then
+          vim.api.nvim_buf_set_extmark(bufnr, preview_ns, i - 1, 0, { end_row = i, hl_group = hl, hl_eol = true })
+        end
+      end
+
+      if valid_win then
+        -- Wrapped, so nothing is lost off the right edge.
+        vim.wo[winid].wrap = true
+        -- Open on the newest line, at the bottom of the window. This has to wait
+        -- a tick: on a first visit telescope hands the freshly built buffer to
+        -- the preview window from a scheduled callback that has not run yet, so
+        -- a cursor set here would scroll the *previous* entry's buffer and the
+        -- swap would then drop us back at line 1. Queued after theirs, it sticks.
+        vim.schedule(function()
+          if not (vim.api.nvim_win_is_valid(winid) and vim.api.nvim_win_get_buf(winid) == bufnr) then
+            return
+          end
+          pcall(vim.api.nvim_win_set_cursor, winid, { vim.api.nvim_buf_line_count(bufnr), 0 })
+          pcall(vim.api.nvim_win_call, winid, function()
+            vim.cmd 'normal! zb'
+          end)
+        end)
+      end
+    end,
+  }
+end
+
+-- Session picker. Bare (<leader>af) it lists every project's sessions;
+-- `opts.key` narrows that to one project key and `opts.cwd` is where Claude then
+-- runs, which for a deleted worktree is the repo it was folded back into.
+-- Sessions under another key are dimmed but still resumable: `claude --resume
+-- <id>` falls back to scanning ~/.claude/projects for that id.
+---@param opts { key: string?, cwd: string?, title: string?, allow_new: boolean? }?
+local function pick_claude_session(opts)
+  local pickers = require 'telescope.pickers'
+  local finders = require 'telescope.finders'
+  local conf = require('telescope.config').values
+  local actions = require 'telescope.actions'
+  local action_state = require 'telescope.actions.state'
+
+  opts = opts or {}
+  local path_map = build_path_map()
+  local sessions_base = vim.fn.expand '~/.claude/projects'
+  local run_cwd = opts.cwd
+  local home_key = encode_project(run_cwd or vim.fn.getcwd())
+  local wt_keys = worktree_keys()
+  local entries = {}
+
+  for _, project_dir in ipairs(vim.fn.glob(sessions_base .. '/*', false, true)) do
+    local encoded_name = vim.fn.fnamemodify(project_dir, ':t')
+    local display_project = path_map[encoded_name] or encoded_name
+
+    if not opts.key or encoded_name == opts.key then
+      for _, session_file in ipairs(vim.fn.glob(project_dir .. '/*.jsonl', false, true)) do
+        local here = encoded_name == home_key
+        table.insert(entries, {
+          session_id = vim.fn.fnamemodify(session_file, ':t:r'),
+          file = session_file,
+          project = display_project,
+          summary = read_session_title(session_file),
+          mtime = vim.fn.getftime(session_file),
+          loadable = here,
+          origin = here and 'here' or (wt_keys[encoded_name] and 'worktree' or 'other'),
+        })
+      end
+    end
+  end
+
+  -- This repo's sessions -- cwd and worktrees together -- then everyone else's;
+  -- newest first within each group.
+  table.sort(entries, function(a, b)
+    local ra, rb = ORIGIN_RANK[a.origin], ORIGIN_RANK[b.origin]
+    if ra ~= rb then
+      return ra < rb
+    end
+    return a.mtime > b.mtime
+  end)
+
+  -- After the sort, so it stays pinned above the sessions: a worktree nobody has
+  -- opened yet has none, and the picker would otherwise be a dead end.
+  if opts.allow_new then
+    local home = vim.fn.expand '~'
+    table.insert(entries, 1, {
+      new = true,
+      -- Telescope reads `value` off every entry, so keep it a string.
+      session_id = '',
+      file = '',
+      summary = 'Start a new session',
+      project = ((run_cwd or vim.fn.getcwd()):gsub('^' .. vim.pesc(home), '~')),
+      mtime = 0,
+      loadable = true,
+      origin = 'here',
+    })
+  end
+
+  pickers
+    .new({}, {
+      prompt_title = opts.title or 'Claude Sessions',
+      finder = finders.new_table {
+        results = entries,
+        entry_maker = function(entry)
+          local make_display = function(e)
+            local title = e.summary ~= '' and e.summary or '(no message)'
+            local path_str = '  ' .. e.project
+            local time_str = e.new and '' or ('  ' .. relative_time(e.mtime))
+            local display = title .. path_str .. time_str
+            -- An unrelated project is dimmed whole; anything from this repo keeps
+            -- a readable title and says which tree it came from in the path.
+            if e.origin == 'other' then
+              return display, { { { 0, #display }, 'LspInlayHint' } }
+            end
+            return display,
+              {
+                { { #title, #title + #path_str }, ORIGIN_PATH_HL[e.origin] },
+                { { #title + #path_str, #display }, 'Special' },
+              }
+          end
+          return {
+            value = entry.session_id,
+            file = entry.file,
+            display = make_display,
+            ordinal = entry.summary .. ' ' .. entry.project,
+            summary = entry.summary,
+            project = entry.project,
+            mtime = entry.mtime,
+            loadable = entry.loadable,
+            origin = entry.origin,
+            new = entry.new,
+          }
+        end,
+      },
+      sorter = conf.generic_sorter {},
+      previewer = session_previewer(),
+      attach_mappings = function(prompt_bufnr, map)
+        local function resume_session()
+          local selection = action_state.get_selected_entry()
+          if not selection then
+            return
+          end
+          actions.close(prompt_bufnr)
+          -- `cond and nil or x` is always x in Lua, so branch explicitly.
+          local cmd_args = nil
+          if not selection.new then
+            cmd_args = '--resume ' .. selection.value
+            if not selection.loadable then
+              vim.notify('Resuming a session from ' .. selection.project)
+            end
+          end
+          launch_claude(cmd_args, run_cwd)
+        end
+        map('i', '<CR>', resume_session)
+        map('n', '<CR>', resume_session)
+        return true
+      end,
+    })
+    :find()
 end
 
 -- Pick one of this repo's worktrees -- live ones first, then deleted ones that
@@ -534,6 +793,75 @@ local function slash_command_names()
   return names
 end
 
+-- @file candidates: every file *and* directory under cwd, so a fragment can be
+-- fuzzy matched against the whole path ("clcode" -> lua/plugins/claudecode.lua)
+-- the way Claude's own terminal file search works, instead of walking the tree
+-- one directory level at a time the way getcompletion() does. Cached like
+-- slash_cache -- built on the first @ you type, dropped when a box opens, so a
+-- file created mid-session shows up the next time you pop the box.
+local file_cache = nil
+
+-- Cap on what reaches the popup menu. The fuzzy match ranks the entire tree, but
+-- a menu of thousands of paths is slow to redraw and nothing past the first
+-- screenful is ever the entry you meant.
+local MAX_FILE_ITEMS = 200
+
+-- Run a lister and return its stdout lines, or nil if it isn't installed, fails,
+-- or has nothing to say -- which is the signal to try the next fallback.
+local function lister_output(cmd)
+  local ok, res = pcall(function()
+    return vim.system(cmd, { cwd = vim.fn.getcwd(), text = true }):wait(3000)
+  end)
+  if not ok or res.code ~= 0 or not res.stdout then
+    return nil
+  end
+  local lines = vim.split(res.stdout, '\n', { trimempty = true })
+  return #lines > 0 and lines or nil
+end
+
+-- Every path under cwd, relative and with directories marked by a trailing "/".
+local function project_files()
+  if file_cache then
+    return file_cache
+  end
+  -- fd is the fast path: gitignore-aware (so build output and node_modules stay
+  -- out of the menu, as they do in Claude's terminal) and it already prints the
+  -- trailing slash on directories.
+  local paths =
+    lister_output { 'fd', '--type', 'f', '--type', 'd', '--hidden', '--exclude', '.git', '--strip-cwd-prefix' }
+  if not paths then
+    paths = lister_output { 'git', 'ls-files', '--cached', '--others', '--exclude-standard' }
+    if paths then
+      -- git lists files only; re-derive each parent directory so "@dir" still
+      -- completes to something.
+      local dirs, seen = {}, {}
+      for _, path in ipairs(paths) do
+        local slash = path:find '/'
+        while slash do
+          local dir = path:sub(1, slash)
+          if not seen[dir] then
+            seen[dir] = true
+            dirs[#dirs + 1] = dir
+          end
+          slash = path:find('/', slash + 1)
+        end
+      end
+      vim.list_extend(paths, dirs)
+      table.sort(paths)
+    end
+  end
+  if not paths then
+    -- Last resort with neither tool: a plain recursive glob. Misses dotfiles and
+    -- honours no ignore file, but it never comes up empty.
+    paths = {}
+    for _, path in ipairs(vim.fn.glob('**/*', false, true)) do
+      paths[#paths + 1] = vim.fn.isdirectory(path) == 1 and path .. '/' or path
+    end
+  end
+  file_cache = paths
+  return paths
+end
+
 -- Native replacement for the old nvim-cmp source: completes @file paths and
 -- /commands inside the prompt buffer. nvim-cmp is not part of this config, so
 -- this drives the built-in popup menu with vim.fn.complete() instead.
@@ -565,12 +893,26 @@ local function prompt_complete()
     return true
   end
 
-  -- @file: complete the last @token as a path relative to cwd.
+  -- @file: fuzzy match the last @token against every path in the project.
+  -- 'fuzzy' is already in completeopt, so the menu's own narrowing agrees with
+  -- the ranking here rather than fighting it. A token that points outside the
+  -- project (absolute, ~, ./ or ../) has no candidate list to match against and
+  -- keeps plain prefix completion -- which also backstops whatever fd's ignore
+  -- rules left out of project_files().
   local at = before:find '@%S*$'
   if at then
     local partial = before:sub(at + 1)
+    local matches
+    if partial == '' then
+      matches = vim.list_slice(project_files(), 1, MAX_FILE_ITEMS)
+    elseif not (partial:match '^[/~]' or partial:match '^%.%.?/') then
+      matches = vim.fn.matchfuzzy(project_files(), partial, { limit = MAX_FILE_ITEMS })
+    end
+    if not matches or #matches == 0 then
+      matches = vim.fn.getcompletion(partial, 'file')
+    end
     local items = {}
-    for _, path in ipairs(vim.fn.getcompletion(partial, 'file')) do
+    for _, path in ipairs(matches) do
       items[#items + 1] = { word = '@' .. path, kind = path:sub(-1) == '/' and 'd' or 'f' }
     end
     vim.fn.complete(at, items)
@@ -586,8 +928,9 @@ end
 -- this, and rebuild the menu out from under the cursor. TextChangedP is needed
 -- alongside TextChangedI because only it fires while the menu is open.
 local function attach_completion(buf)
-  -- One box, one directory walk: see slash_command_names.
+  -- One box, one directory walk each: see slash_command_names / project_files.
   slash_cache = nil
+  file_cache = nil
   local typed = false
   vim.api.nvim_create_autocmd('InsertCharPre', {
     buffer = buf,
@@ -1001,7 +1344,11 @@ local function open_prompt_input()
   -- previewed suggestion if there is one, else insert a literal tab.
   vim.keymap.set('i', '<Tab>', function()
     if vim.fn.pumvisible() == 1 then
-      feed '<C-y>'
+      -- 'noselect' leaves nothing highlighted until you walk the menu, and <C-y>
+      -- with no selection just dismisses it -- which for a fuzzy token like
+      -- "@clcode" would leave behind text that is not a path at all. Take the
+      -- top-ranked entry in that case.
+      feed(vim.fn.complete_info({ 'selected' }).selected == -1 and '<C-n><C-y>' or '<C-y>')
     elseif accept_suggestion() then
       return
     else

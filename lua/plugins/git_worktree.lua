@@ -47,6 +47,29 @@ local function worktree_dest(root, name)
   return vim.fs.joinpath(root, '.claude', 'worktrees', name)
 end
 
+-- Make a freshly added worktree usable: symlink the local-only files (not
+-- tracked by git, so `worktree add` does not bring them) from `src`, then let
+-- the project hook in. Shared by the CREATE hook and move_branch_to_worktree.
+local function prepare_worktree(src, dest, branch)
+  dest = vim.fn.fnamemodify(dest, ':p'):gsub('/$', '')
+  if src ~= '' and src ~= dest then
+    for _, item in ipairs(_G.worktree_symlinks or { '.env', '.vscode' }) do
+      local from = vim.fs.joinpath(src, item)
+      if vim.uv.fs_stat(from) then
+        -- -f replaces an existing entry; -n avoids dereferencing a symlinked
+        -- directory target.
+        local res = vim.system({ 'ln', '-sfn', from, vim.fs.joinpath(dest, item) }):wait()
+        if res.code ~= 0 then
+          vim.notify('Failed to symlink ' .. item .. ' into worktree', vim.log.levels.WARN)
+        end
+      end
+    end
+  end
+  if _G.worktree_create_callback ~= nil then
+    _G.worktree_create_callback(dest, branch)
+  end
+end
+
 -- Worktree records for the repo `cwd` is in; nil when that is not a repo. The
 -- parsing lives in util.git so the Claude worktree maps read the same records.
 local function worktree_records(cwd)
@@ -226,23 +249,7 @@ end
 -- Promote the current worktree onto the main working tree: bring its branch
 -- (committed history) and any uncommitted work over, then tear the worktree
 -- down. The main tree ends up checked out on the worktree's branch.
-local function move_worktree_to_repo()
-  local ok, cur = git_out { 'rev-parse', '--show-toplevel' }
-  if not ok or cur == '' then
-    vim.notify('Not inside a git worktree', vim.log.levels.ERROR)
-    return
-  end
-
-  local main = main_worktree(cur)
-  if not main then
-    vim.notify('Could not locate the main working tree', vim.log.levels.ERROR)
-    return
-  end
-  if vim.fn.fnamemodify(main, ':p') == vim.fn.fnamemodify(cur, ':p') then
-    vim.notify('Already in the main working tree — nothing to move', vim.log.levels.WARN)
-    return
-  end
-
+local function move_worktree_to_repo(cur, main)
   local ok_branch, branch = git_out { '-C', cur, 'rev-parse', '--abbrev-ref', 'HEAD' }
   if not ok_branch or branch == '' or branch == 'HEAD' then
     vim.notify('Worktree is on a detached HEAD; cannot move by branch', vim.log.levels.ERROR)
@@ -310,9 +317,10 @@ local function move_worktree_to_repo()
   local stashed = false
   local _, cur_dirty = git_lines { '-C', cur, 'status', '--porcelain' }
   if #cur_dirty > 0 then
-    local stash_ok = git_out { '-C', cur, 'stash', 'push', '--include-untracked', '-m', 'worktree-move: ' .. branch }
+    local stash_ok, _, stash_err =
+      git_out { '-C', cur, 'stash', 'push', '--include-untracked', '-m', 'worktree-move: ' .. branch }
     if not stash_ok then
-      vim.notify('Failed to stash worktree changes; aborting', vim.log.levels.ERROR)
+      vim.notify(with_stderr('Failed to stash worktree changes; aborting', stash_err), vim.log.levels.ERROR)
       return
     end
     stashed = true
@@ -355,6 +363,132 @@ local function move_worktree_to_repo()
   vim.notify(('Moved %s onto the main working tree'):format(branch))
 end
 
+-- Lift the current branch out of the main working tree into a linked worktree:
+-- the mirror of move_worktree_to_repo. Uncommitted work travels with it and the
+-- main tree is left on the base branch, free for the dev stack.
+local function move_branch_to_worktree(root)
+  local ok_branch, branch = git_out { '-C', root, 'rev-parse', '--abbrev-ref', 'HEAD' }
+  if not ok_branch or branch == '' or branch == 'HEAD' then
+    vim.notify('Main tree is on a detached HEAD; cannot move by branch', vim.log.levels.ERROR)
+    return
+  end
+
+  -- Where the main tree is left afterwards, and what new worktrees fork from.
+  local base = (_G.worktree_from_branch or require('util.git').main_branch()):gsub('^origin/', '')
+  if branch == base then
+    vim.notify(('Already on %s — check out the branch you want to move first'):format(base), vim.log.levels.WARN)
+    return
+  end
+
+  -- The stash below reads from disk, so unwritten buffers would be left behind
+  -- in the tree their branch just left.
+  local unsaved = modified_buffers_under(root)
+  if #unsaved > 0 then
+    vim.notify(
+      'Unsaved changes in the main tree; write or discard them first:\n  ' .. table.concat(unsaved, '\n  '),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  vim.ui.input({ prompt = 'New worktree name: ', default = branch }, function(name)
+    name = name and vim.trim(name)
+    if not name or name == '' then
+      return
+    end
+
+    local dest = worktree_dest(root, name)
+    if vim.uv.fs_stat(dest) then
+      vim.notify('Already exists: ' .. dest, vim.log.levels.ERROR)
+      return
+    end
+
+    local prompt = ('Move branch %s out of\n%s\ninto a worktree at\n%s ?\n\nThe main tree is left on %s.'):format(
+      branch,
+      root,
+      dest,
+      base
+    )
+    if vim.fn.confirm(prompt, '&Yes\n&No', 2) ~= 1 then
+      return
+    end
+
+    local stashed = false
+    local _, dirty = git_lines { '-C', root, 'status', '--porcelain' }
+    if #dirty > 0 then
+      local ok_stash, _, stash_err =
+        git_out { '-C', root, 'stash', 'push', '--include-untracked', '-m', 'worktree-move: ' .. branch }
+      if not ok_stash then
+        vim.notify(with_stderr('Failed to stash changes; aborting', stash_err), vim.log.levels.ERROR)
+        return
+      end
+      stashed = true
+    end
+
+    -- git will not check one branch out in two trees, so the main tree has to
+    -- leave it before the worktree can take it.
+    local ok_co, _, co_err = git_out { '-C', root, 'checkout', base }
+    if not ok_co then
+      if stashed then
+        git_out { '-C', root, 'stash', 'pop' }
+      end
+      vim.notify(with_stderr('Failed to check out ' .. base, co_err), vim.log.levels.ERROR)
+      return
+    end
+
+    local ok_add, _, add_err = git_out { '-C', root, 'worktree', 'add', dest, branch }
+    if not ok_add then
+      git_out { '-C', root, 'checkout', branch }
+      if stashed then
+        git_out { '-C', root, 'stash', 'pop' }
+      end
+      vim.notify(with_stderr('Failed to create the worktree', add_err), vim.log.levels.ERROR)
+      return
+    end
+
+    prepare_worktree(root, dest, branch)
+
+    if stashed and not (git_out { '-C', dest, 'stash', 'pop' }) then
+      vim.notify('Branch moved, but restoring changes hit conflicts — resolve them in ' .. dest, vim.log.levels.WARN)
+    end
+
+    -- Follow the work: staying put would leave every buffer showing the base
+    -- branch's version of a file whose changes now live in the worktree.
+    vim.cmd.cd(vim.fn.fnameescape(dest))
+    local buf = vim.api.nvim_buf_get_name(0)
+    if buf:find '^oil:///' then
+      require('oil').open(dest)
+    elseif buf:sub(1, #root + 1) == root .. '/' then
+      pcall(vim.cmd.edit, vim.fn.fnameescape(dest .. '/' .. buf:sub(#root + 2)))
+    end
+
+    vim.notify(('Moved %s into %s'):format(branch, dest))
+  end)
+end
+
+-- <leader>wwm moves your work between the two trees, in whichever direction you
+-- are: from a linked worktree it folds the branch onto the main tree, from the
+-- main tree it lifts the current branch out into a worktree.
+local function move_worktree()
+  local ok, cur = git_out { 'rev-parse', '--show-toplevel' }
+  if not ok or cur == '' then
+    vim.notify('Not inside a git worktree', vim.log.levels.ERROR)
+    return
+  end
+
+  local main = main_worktree(cur)
+  if not main then
+    vim.notify('Could not locate the main working tree', vim.log.levels.ERROR)
+    return
+  end
+
+  if vim.fn.fnamemodify(main, ':p') == vim.fn.fnamemodify(cur, ':p') then
+    move_branch_to_worktree(cur)
+  else
+    move_worktree_to_repo(cur, main)
+  end
+end
+
 return {
   {
     'polarmutex/git-worktree.nvim',
@@ -365,7 +499,7 @@ return {
       { '<leader>www', switch_worktree, desc = 'worktree_switch' },
       { '<leader>wwc', create_worktree, desc = 'worktree_create' },
       { '<leader>wwd', delete_worktree, desc = 'worktree_delete' },
-      { '<leader>wwm', move_worktree_to_repo, desc = 'worktree_move_to_repo' },
+      { '<leader>wwm', move_worktree, desc = 'worktree_move' },
     },
     config = function()
       require('telescope').load_extension 'git_worktree'
@@ -380,30 +514,9 @@ return {
         stay_after_create = create_origin or vim.uv.cwd()
         create_origin = nil
 
-        -- Symlink local-only files (not tracked by git) into the fresh worktree
-        -- so it's ready to run and stays in sync with the source. The hook fires
-        -- before the switch, so cwd is still the source worktree.
+        -- The hook fires before the switch, so cwd is still the source worktree.
         local ok, src = git_out { 'rev-parse', '--show-toplevel' }
-        local dest = vim.fn.fnamemodify(path, ':p'):gsub('/$', '')
-        local symlinks = _G.worktree_symlinks or { '.env', '.vscode' }
-        if ok and src ~= '' and src ~= dest then
-          for _, item in ipairs(symlinks) do
-            local from = vim.fs.joinpath(src, item)
-            local to = vim.fs.joinpath(dest, item)
-            if vim.uv.fs_stat(from) then
-              -- -f replaces an existing entry; -n avoids dereferencing a
-              -- symlinked directory target.
-              local res = vim.system({ 'ln', '-sfn', from, to }):wait()
-              if res.code ~= 0 then
-                vim.notify('Failed to symlink ' .. item .. ' into worktree', vim.log.levels.WARN)
-              end
-            end
-          end
-        end
-
-        if _G.worktree_create_callback ~= nil then
-          _G.worktree_create_callback(path, branch)
-        end
+        prepare_worktree(ok and src or '', path, branch)
       end)
 
       Hooks.register(Hooks.type.SWITCH, function(path, prev_path)
