@@ -1,4 +1,3 @@
--- Typing practice, for when the day is already lost.
 return {
   {
     'kwakzalver/duckytype.nvim',

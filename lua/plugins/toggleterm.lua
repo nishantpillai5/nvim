@@ -1,5 +1,3 @@
--- PANEL_POSITION was a global env knob; only toggleterm and overseer read it,
--- and each now keeps its own constant.
 local DIRECTION = 'horizontal' -- 'horizontal' | 'vertical'
 
 return {

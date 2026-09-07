@@ -1,6 +1,3 @@
--- Breakpoints that survive a restart. They are stored per project and restored
--- on BufReadPost, which is why this loads on file-open rather than on its keys
--- -- and why nvim-dap comes with it, since restoring goes through dap's API.
 return {
   {
     'Weissle/persistent-breakpoints.nvim',

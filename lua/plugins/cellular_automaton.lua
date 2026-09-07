@@ -1,4 +1,3 @@
--- When nothing works.
 return {
   {
     'eandrju/cellular-automaton.nvim',

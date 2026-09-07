@@ -1,4 +1,3 @@
--- Edits the symlink target rather than the link itself.
 return {
   {
     'aymericbeaumet/vim-symlink',

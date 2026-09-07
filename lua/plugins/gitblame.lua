@@ -21,7 +21,6 @@ return {
       },
     },
     init = function()
-      -- Must be set before the plugin loads.
       vim.g.gitblame_display_virtual_text = 0
       vim.g.gitblame_date_format = '%r'
       vim.g.gitblame_highlight_group = 'GitSignsCurrentLineBlame'

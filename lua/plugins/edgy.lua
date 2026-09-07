@@ -1,9 +1,3 @@
--- Docked window layout. A few slots below are for plugins that aren't in this
--- config yet (trouble, neo-tree, vista): an `ft` that never appears simply never
--- matches, so the full layout is kept and each panel starts docking the moment
--- its plugin lands.
---
--- SIDEBAR_POSITION was a global env knob in the old config; it only matters here.
 local SIDEBAR_POSITION = 'right' -- 'left' | 'right'
 
 local SIZES = {

@@ -287,18 +287,11 @@ return {
       },
       component_aliases = {
         default = {
-          'on_output_summarize',
           'on_exit_set_status',
           'on_complete_notify',
           'on_complete_dispose',
-          -- lua/overseer/component/custom/vscode_env.lua
+          -- local component: lua/overseer/component/custom/vscode_env.lua
           'custom.vscode_env',
-        },
-        default_neotest = {
-          'on_output_summarize',
-          'on_exit_set_status',
-          'on_complete_notify',
-          'on_complete_dispose',
         },
       },
     },

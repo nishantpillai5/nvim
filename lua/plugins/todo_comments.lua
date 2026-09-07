@@ -34,11 +34,9 @@ return {
         desc = 'todo_first',
       },
       { '<leader>fT', '<cmd>TodoTelescope<cr>', desc = 'todos' },
-      -- The old config also bound <leader>tT to TodoTrouble; trouble.nvim isn't
-      -- part of this config.
     },
     opts = function()
-      -- Highlight the user's own TODO prefix (e.g. NISH:) alongside the defaults.
+      -- Highlight the user's own TODO prefix
       return {
         keywords = {
           [require('util.env').TODO_CUSTOM] = { icon = '󰬕', color = 'info' },

@@ -1,5 +1,3 @@
--- Shortcut actions must resolve when pressed, so each points at something this
--- config actually has.
 return {
   {
     'nvimdev/dashboard-nvim',

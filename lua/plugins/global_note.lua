@@ -1,6 +1,3 @@
--- Scratch notes that live in DIR_NOTES rather than the project: one global, one
--- per project, one per git branch. The old config also carried a
--- `git_project_name` helper that nothing called; it is not here.
 local env = require 'util.env'
 
 -- Basename of the cwd, used to name the project- and branch-local notes.

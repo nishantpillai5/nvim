@@ -1,5 +1,3 @@
--- The notes vault, at `util.env`'s DIR_NOTES. Loads for markdown files inside
--- it, or on the first `<leader>n` mapping.
 local env = require 'util.env'
 local notes = vim.fs.normalize(env.DIR_NOTES)
 

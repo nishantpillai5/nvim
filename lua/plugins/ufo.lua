@@ -1,4 +1,3 @@
--- Fold text like `foo() 󰁂 12`, truncated to the window width.
 local function fold_virt_text(virt_text, lnum, end_lnum, width, truncate)
   local result = {}
   local suffix = (' 󰁂 %d '):format(end_lnum - lnum)

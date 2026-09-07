@@ -2,8 +2,6 @@ return {
   {
     'stevearc/oil.nvim',
     dependencies = { 'nvim-tree/nvim-web-devicons' },
-    -- `cmd` matters as much as `keys`: without it :Oil does not exist until the
-    -- keymap fires, and the dashboard's Explorer shortcut runs :Oil directly.
     cmd = 'Oil',
     keys = {
       { '<leader>ef', '<cmd>Oil<cr>', desc = 'oil' },

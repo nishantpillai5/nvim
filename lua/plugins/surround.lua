@@ -1,7 +1,3 @@
--- mini.surround, on the old config's mappings: `<leader>v` adds a surrounding,
--- the rest hang off `<leader>V`. The `keys` entries are the lazy trigger and
--- the source of which-key's labels -- mini installs the real mappings itself
--- from `opts.mappings`, so the two lists have to agree.
 return {
   {
     'echasnovski/mini.surround',

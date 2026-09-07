@@ -11,8 +11,6 @@ return {
       {
         '<leader>zpf',
         function()
-          -- Loaded on demand rather than in config, so pomo doesn't pull
-          -- telescope in at startup.
           require('telescope').load_extension 'pomodori'
           require('telescope').extensions.pomodori.timers()
         end,

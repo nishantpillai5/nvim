@@ -11,7 +11,6 @@ return {
       {
         '<leader>fp',
         function()
-          -- Load on demand so this works whichever of the two loads first.
           require('telescope').load_extension 'yank_history'
           vim.cmd 'Telescope yank_history'
         end,

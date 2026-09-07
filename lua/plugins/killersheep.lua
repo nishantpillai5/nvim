@@ -1,4 +1,3 @@
--- GOTY.
 return {
   {
     'seandewar/killersheep.nvim',

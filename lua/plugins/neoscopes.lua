@@ -1,5 +1,3 @@
--- Scoped finding. The pickers in telescope.lua read the active scope at call
--- time via util.scope, so nothing here rebinds keymaps.
 return {
   {
     'smartpde/neoscopes',

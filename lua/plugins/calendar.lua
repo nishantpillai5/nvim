@@ -1,6 +1,3 @@
--- A month view beside the journal. Opening a journal note pops the calendar to
--- that month; picking a day in the calendar opens that day's note, and days that
--- already have one are marked. edgy docks it left by its `calendar` filetype.
 local env = require 'util.env'
 
 local journal = vim.fs.joinpath(vim.fs.normalize(env.DIR_NOTES), 'journal')

@@ -1,10 +1,3 @@
--- Test running. Each language needs its own adapter; python and gtest are the
--- two the old config carried. Results run as overseer tasks (see the
--- `default_neotest` component alias in overseer.lua), so a test run shows up in
--- the task list and the lualine task indicator like any other job.
---
--- FixCursorHold.nvim was a dependency in the old config; the CursorHold bug it
--- worked around is long fixed, so it is dropped here.
 return {
   {
     'nvim-neotest/neotest',
@@ -102,9 +95,6 @@ return {
       require('neotest').setup {
         adapters = {
           require('neotest-gtest').setup {},
-          -- No `python` here on purpose: the adapter then looks for the
-          -- project's own venv (venv/, .venv/) before falling back to python3.
-          -- The old config pinned a machine-specific interpreter instead.
           require 'neotest-python' {},
         },
         consumers = {
