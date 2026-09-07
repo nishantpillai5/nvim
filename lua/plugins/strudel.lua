@@ -46,7 +46,7 @@ return {
         function()
           require('strudel').launch()
         end,
-        desc = 'launch',
+        desc = 'music_strudel',
       },
     },
     config = function()

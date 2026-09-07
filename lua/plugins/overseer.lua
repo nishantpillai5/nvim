@@ -245,24 +245,26 @@ return {
         end,
         desc = 'stop_all',
       },
-
-      -- <leader>ows / owl / owd are gone with task bundles, which v2 deleted in
-      -- favour of the resession extension configured in plugins/resession.lua.
-
       { '<leader>or', run_task('run_template', 'Run'), desc = 'run' },
       { '<leader>ob', run_task('build_template', 'Build'), desc = 'build' },
     },
     opts = {
-      -- No `strategy`: v2 removed the option along with the toggleterm and
-      -- terminal strategies, and jobstart-into-a-terminal-buffer is the default.
-      -- `bundles` went with the bundle feature; autostart_on_load moved to the
-      -- resession extension.
       dap = false,
       task_list = {
         -- `width` only ever applied to a left/right task list, and direction
         -- defaults to "bottom", so it was already inert -- v2 dropped it.
         render = function(task)
-          return require('overseer.render')[DETAIL_FORMATS[detail]](task)
+          local render = require 'overseer.render'
+          local lines = render[DETAIL_FORMATS[detail]](task)
+          -- All three built-in formats open with status_and_name. When a project
+          -- exrc defines _G.task_formatter, that label is what the lualine
+          -- indicator shows, so swap it in here too; with no hook set the
+          -- formatter falls back to the raw command, which reads worse than the
+          -- task name overseer already renders.
+          if tasks.has_formatter() then
+            lines[1] = render.join(render.status(task), { { tasks.task_formatter(task), 'OverseerTask' } }, ': ')
+          end
+          return lines
         end,
         -- `bindings` -> `keymaps`, and the action names are now "keymap.*"
         -- handlers taking an `opts` table.

@@ -93,6 +93,8 @@ return {
   -- Notes ---------------------------------------------------------------------
   'obsidian-nvim/obsidian.nvim',
   'iamcco/markdown-preview.nvim',
+  'jbyuki/nabla.nvim',
+  'MeanderingProgrammer/render-markdown.nvim',
   'backdround/global-note.nvim',
   'mattn/calendar-vim',
   'Avi-D-coder/whisper.nvim',

@@ -50,7 +50,7 @@ return {
           { '<leader>ww', group = 'Worktree' },
           { '<leader>z', group = 'Visual', mode = { 'n', 'v' } },
           { '<leader>zO', group = 'Run' },
-          { '<leader>zp', group = 'Pomodoro' },
+          { '<leader>zt', group = 'Pomodoro' },
           -- nvim-biscuits registers <leader>zC itself, from `toggle_keybind`.
           { '<leader>zC', desc = 'context_virtual' },
           -- mini.surround installs its own mappings once loaded, overwriting

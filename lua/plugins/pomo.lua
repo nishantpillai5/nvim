@@ -5,11 +5,11 @@ return {
     dependencies = { 'rcarriga/nvim-notify' },
     cmd = { 'TimerStart', 'TimerRepeat', 'TimerSession' },
     keys = {
-      { '<leader>zps', '<cmd>TimerSession pomodoro<cr>', desc = 'start' },
-      { '<leader>zpr', '<cmd>TimerResume<cr>', desc = 'resume' },
-      { '<leader>zpp', '<cmd>TimerPause<cr>', desc = 'pause' },
+      { '<leader>zts', '<cmd>TimerSession pomodoro<cr>', desc = 'start' },
+      { '<leader>ztr', '<cmd>TimerResume<cr>', desc = 'resume' },
+      { '<leader>ztp', '<cmd>TimerPause<cr>', desc = 'pause' },
       {
-        '<leader>zpf',
+        '<leader>ztf',
         function()
           require('telescope').load_extension 'pomodori'
           require('telescope').extensions.pomodori.timers()

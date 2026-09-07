@@ -7,8 +7,10 @@
 -- and torn down IDLE_MS after the last one closes, which within a session leaves
 -- it warm across turns and charges only the first box for the load.
 --
--- Saying the word in util/dictation.lua ends dictation and sends the box, so a
--- prompt can be spoken start to finish without reaching for the keyboard.
+-- Saying one of the words in util/dictation.lua ends dictation and acts on the
+-- box -- send it, or answer the dialog on screen or stop the turn the way
+-- <leader>j / <leader>k / <leader>al do -- so a whole turn can be spoken without
+-- reaching for the keyboard.
 
 local dictation = require 'util.dictation'
 
@@ -174,21 +176,36 @@ local function detach()
   arm_idle()
 end
 
--- Press the box's own <CR> rather than reimplementing it: sending, closing and
--- the teardown that follows all belong to claudecode.lua's prompt float, and its
--- insert-mode mapping is the one entry point. Called from the poll timer, so the
--- box has to still be the buffer whisper has been writing into.
-local function send_prompt()
-  local buf = vim.api.nvim_get_current_buf()
-  if not (vim.g.whisper_dictating and vim.b[buf].ai_prompt) then
-    return false
-  end
-  local map = vim.fn.maparg('<CR>', 'i', false, true)
+-- Press the box's own key rather than reimplementing what it does: sending,
+-- cancelling, and the teardown that follows either belong to the prompt float in
+-- util/ai/prompt.lua, and its insert-mode mappings are the one entry point.
+local function press(lhs)
+  local map = vim.fn.maparg(lhs, 'i', false, true)
   if map.buffer ~= 1 or not map.callback then
     return false
   end
   map.callback()
   return true
+end
+
+-- Run what a spoken trigger asked for. Called from the poll timer, so the box
+-- has to still be the buffer whisper has been writing into.
+--
+-- Everything else goes to the agent's PTY through the same op its <leader> key
+-- dispatches to -- answering whatever dialog is on screen, or stopping the turn
+-- in flight -- without moving focus; the box is then cancelled rather than sent,
+-- because what was spoken was not a prompt. The keystroke goes first -- <Esc>
+-- wipes the buffer this is running in.
+local function run_action(action)
+  local buf = vim.api.nvim_get_current_buf()
+  if not (vim.g.whisper_dictating and vim.b[buf].ai_prompt) then
+    return false
+  end
+  if action == 'submit' then
+    return press '<CR>'
+  end
+  require('util.ai').call(action)
+  return press '<Esc>'
 end
 
 local function auto_dictate(bufnr)
@@ -221,7 +238,7 @@ return {
     'Avi-D-coder/whisper.nvim',
     cmd = { 'WhisperToggle', 'WhisperDownloadModel' },
     keys = {
-      { '<leader>nd', mode = { 'n', 'i', 'v' }, desc = 'stt' },
+      { '<leader>nd', mode = { 'n', 'i', 'v' }, desc = 'dictate' },
     },
     init = function()
       vim.g.whisper_auto_dictate = false
@@ -282,19 +299,22 @@ return {
       ---@diagnostic disable-next-line: duplicate-set-field
       audio.insert_streaming_text = function(text)
         local fresh = drop_overlap(text or '')
-        -- Only the prompt-box path listens for the submit word; plain <leader>nd
-        -- dictation into a file keeps every word it hears.
-        local spoken, heard = fresh, false
+        -- Only the prompt-box path listens for the trigger words; plain
+        -- <leader>nd dictation into a file keeps every word it hears.
+        local spoken, action = fresh, nil
         if vim.g.whisper_dictating then
-          spoken, heard = dictation.split(fresh)
+          spoken, action = dictation.split(fresh)
         end
         if spoken ~= '' then
           insert_streaming_text(spoken)
         end
-        if heard then
+        if action then
           -- Deferred: the poll that produced this chunk still has its own
-          -- last-read bookkeeping to do, and sending detaches out from under it.
-          vim.schedule(send_prompt)
+          -- last-read bookkeeping to do, and either action detaches out from
+          -- under it.
+          vim.schedule(function()
+            run_action(action)
+          end)
         end
       end
     end,

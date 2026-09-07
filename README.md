@@ -76,9 +76,8 @@ servers through nvim-lspconfig's old setup path.
 ## Notes on ported plugins
 
 - `lua/plugins/edgy.lua` keeps layout slots for plugins that aren't here yet
-  (trouble, dap-ui, overseer, neotest, neo-tree, vista, fugitive). An
-  `ft` that never appears never matches, so each panel starts docking as soon as
-  its plugin lands.
+  (trouble, neo-tree, vista). An `ft` that never appears never matches, so each
+  panel starts docking as soon as its plugin lands.
 - `lua/plugins/lualine.lua` is the single `lualine.setup` call. The old config
   called it four times, grafting components on from `lsp_zero.lua`, `lint.lua`
   and `noice.lua`; those components are defined inline there instead.
@@ -105,16 +104,14 @@ servers through nvim-lspconfig's old setup path.
   disk as claudecode's terminal provider, so replacing it enabled two snacks
   modules rather than adding a plugin. Only `input` and `picker` are on --
   telescope is still the finder behind every mapping, and `picker` is here for
-  `vim.ui.select` alone. Two things the swap changed: `overseer.lua`'s bundle
-  pickers no longer pass `telescope = require('telescope.themes').get_cursor()`,
-  a per-call option only dressing read; and `git_worktree.lua` dropped its own
-  nui centered float for the create prompt, because snacks.input floats
+  `vim.ui.select` alone. One thing the swap changed: `git_worktree.lua` dropped
+  its own nui centered float for the create prompt, because snacks.input floats
   centered where dressing rendered at the cursor. There is one input style now.
 
 ## Finder
 
-`lua/plugins/telescope.lua` holds telescope plus its extensions;
-`lua/plugins/navigation.lua` holds grapple and other.nvim.
+Telescope's extensions are their own files: `telescope_diff.lua`,
+`telescope_hunk.lua`, `telescope_picker.lua`, `telescope_project.lua`.
 
 Features that lost their backing plugin in this config:
 
@@ -124,10 +121,6 @@ Features that lost their backing plugin in this config:
 - The diff previewer only adds `delta` to the git command when delta is on PATH.
 
 ## Git
-
-`lua/plugins/git.lua` holds fugitive, lazygit, gitsigns, diffview, gitlinker,
-git-conflict, git-blame and gitgraph. `lua/plugins/worktree.lua` holds
-git-worktree.nvim on its own, since its config is substantial.
 
 - `util/git.lua` supplies the branch refs. Its `main_branch()` is why
   `<leader>gl` / `<leader>gfl` (`origin/<main>...HEAD`) resolve at all.
@@ -158,13 +151,53 @@ first `<leader>n` mapping, and `plugins/calendar.lua`,
 - **The calendar tracks the journal.** Opening `journal/*.md` in the vault pops
   the month beside it; a day in the calendar opens that day's note, and days that
   already have one are marked. edgy docks it left by its `calendar` filetype.
-- **markdown-preview is `<leader>zP`, not the old `<leader>zp`.** `<leader>zp` is
-  the Pomodoro prefix here, and a buffer-local `<leader>zp` completes on its own,
-  so the old binding swallowed `<leader>zp*` in every markdown buffer -- i.e. in
-  the whole vault. The mapping is still buffer-local to markdown; `:MarkdownPreview`
-  and friends work anywhere. `MarkdownPreviewToggleTheme` is this config's command
-  rather than the plugin's, as it was before -- it flips `g:mkdp_theme` (`dark` at
-  startup) and re-opens the page, since the theme is read as the page opens.
+- **Two preview keys, both markdown-only.** `<leader>zP` is markdown-preview: the
+  whole file as a web page in the browser. `<leader>zp` is everything in the
+  buffer, and drives three plugins at once through `util/markdown.lua` --
+  render-markdown for headings, tables, code blocks and checkboxes, snacks.image
+  for inline images, and nabla for LaTeX equations. Both keys are lazy `keys`
+  entries carrying `ft = 'markdown'`, which lazy maps buffer-locally on
+  `FileType` rather than globally -- so neither exists outside a markdown buffer,
+  while `:MarkdownPreview` and friends still work anywhere. nabla has no key of
+  its own; its spec is `ft`-only, which is what loads it in time for the toggle.
+- **All three start off,** where each plugin's own default renders on open -- so
+  a note is raw text until you ask, the same shape as `<leader>zP`. Each renderer
+  owns exactly one thing: render-markdown's `latex` is off and so is snacks'
+  `math`, because nabla draws the equations.
+- **The toggle's state is per buffer,** since snacks.image and nabla both attach
+  per buffer. render-markdown is the exception -- its toggle is global, so
+  `util/markdown.lua` mirrors it and only flips it when it disagrees with what
+  the current buffer wants, which leaves it following whichever buffer toggled
+  last.
+- **Images need kitty, and nothing else.** snacks draws them with the Kitty
+  Graphics Protocol (kitty, ghostty and wezterm only) and needs `magick` on PATH
+  for anything that is not a PNG. Under tmux it sets `allow-passthrough` itself,
+  so there is no tmux.conf change to make. (snacks' math would also have wanted
+  `tectonic` or `pdflatex`, neither of which is installed here.)
+- **Turning images off reopens the file, and that costs the buffer.** snacks.image
+  has no detach -- `doc.attach` guards on a buffer-local flag that survives
+  `:edit`, the inline renderer holds an `nvim_buf_attach` whose `on_lines`
+  redraws after any edit, and nothing rechecks `config.enabled` once attached. So
+  `util/markdown.lua` wipes the buffer and reloads the file, losing its marks,
+  undo history and jumplist; it refuses on a modified buffer. Turning images *on*
+  is free -- it clears the flag and calls `doc.attach` directly.
+- **`util/markdown.lua` calls `snacks.image.setup()` itself,** which is why the
+  snacks spec has `image.enabled = false`. setup registers the FileType hook only
+  while `enabled` is true and no-ops after its first call, and snacks loads on
+  `VeryLazy` -- after the first `BufReadPre` -- so leaving it to snacks' own
+  trigger would both miss the file nvim started on and render images with no key
+  pressed.
+- **The old config scoped render-markdown to `ft = { 'copilot-chat' }`** and
+  nothing else, so it never touched a markdown file over there; CopilotChat is
+  not in this config.
+- **Pomodoro moved off `<leader>zp` to `<leader>zt`,** freeing `<leader>zp` for
+  markdown-preview, which is what the old config bound it to. A prefix and a
+  complete mapping cannot share a key: as the Pomodoro prefix, a buffer-local
+  `<leader>zp` would have swallowed `<leader>zp*` in every markdown buffer, i.e.
+  in the whole vault. `zt` reads off pomo.nvim's own `Timer*` commands.
+- **`MarkdownPreviewToggleTheme` is this config's command** rather than the
+  plugin's, as it was before -- it flips `g:mkdp_theme` (`dark` at startup) and
+  re-opens the page, since the theme is read as the page opens.
 - **The preview server is a prebuilt binary.** The spec's `build` calls
   `mkdp#util#install_sync`, which downloads the release binary, in place of the old
   `cd app && yarn install`: no yarn or node, and it blocks, so the Dockerfile's
@@ -396,17 +429,14 @@ in `core/lsp.lua`'s `MASON_PACKAGES` fails the build rather than the editor.
 
 ## Porting more from the old config
 
-This config lives at `~/.config/nvim`, so plain `nvim` runs it. The config it
-grew out of moved to `~/.config/nvim-old` (a git repo, branch `main`) and runs
-under the `nvo` alias -- the two are fully isolated, so it stays a working
-reference rather than an archive.
-
-Its shape, for orientation:
+The old config moved to `~/.config/nvim-old` (a git repo, branch `main`) and
+still runs under the `nvo` alias, so it stays a working reference rather than an
+archive. Its shape:
 
 ```
-lua/plugins/<topic>.lua   specs, grouped by topic, each file opening with a
-                          `local plugins = { ... }` manifest and every spec
-                          gated on `cond = conds['owner/repo']`
+lua/plugins/<topic>.lua   specs grouped by topic, each file opening with a
+                          `local plugins = { ... }` manifest, every spec gated
+                          on `cond = conds['owner/repo']`
 lua/config/<name>.lua     one module per plugin: M.keys, M.keymaps, M.setup,
                           M.config, sometimes M.lualine
 lua/common/               shared across the nvim and vscode branches
@@ -416,6 +446,8 @@ lua/vsc/                  the vscode branch -- deliberately not ported
 
 ### What is still over there
 
+Every plugin the old config actually loaded that this one does not enable:
+
 ```sh
 comm -13 \
   <(grep -ohE "'[^']+/[^']+'" ~/.config/nvim/lua/enabled.lua | tr -d "'" | sort -uf) \
@@ -423,99 +455,36 @@ comm -13 \
     | grep -v -E "^\s*--" | grep -oE "'[^']+/[^']+'" | tr -d "'" | sort -uf)
 ```
 
-Lists every plugin the old config actually loaded that this config does not
-enable. The `grep -v` drops the entries commented out in the old manifests --
-without it the count is 56 rather than 37, since those entries are still text in
-the manifest range. One caveat remains: a plugin ported under a fork shows up as
-missing (the old manifest says `folke/todo-comments.nvim`, we run
-`nishantpillai5/todo-comments.nvim`).
+The `grep -v` drops entries commented out in the old manifests -- plugins it had
+already disabled, which are not gaps. Read the raw output with these corrections:
 
-The old config had already disabled 19 of its own: opencode, copilot.vim,
-copilot.lua, CopilotChat, coerce, jupytext, dap-python, eyeliner, outline,
-easypick, leetcode, competitest, marp, luarocks, hardtime, strudel, beepboop,
-presence, rest.nvim. Those are not gaps.
+- **Ported under a fork, so not missing**: `folke/todo-comments.nvim`,
+  `f-person/git-blame.nvim`, `norcalli/nvim-colorizer.lua`.
+- **Dropped on purpose**: `lsp-zero` and `LuaSnip` (native LSP -- but note there
+  is no snippet engine here at all), `luvit-meta` (obsolete lazydev dep),
+  `dressing.nvim` (snacks owns `vim.ui.input` / `vim.ui.select`).
+- **Not planned**: `chezmoi.nvim`, `nvim-ghost.nvim`, and the quarto stack --
+  `quarto-nvim` plus everything installed for it: `otter.nvim` and `molten-nvim`
+  (both quarto dependencies) and `3rd/image.nvim` (molten's). No notebook support
+  here. This is also why the Dockerfile drops ruby and imagemagick. `nabla.nvim`
+  came out of that group and is ported -- see Notes and journal.
 
-#### The 37, grouped
+That leaves 20 real gaps. Their keymaps are whatever `nvo` still binds:
 
-The keymaps listed are what came off with the plugin.
+| Group | Plugins |
+| --- | --- |
+| Editing | `mini.align`, `nvim-recorder`, `nvim-expand-expr`, `demicolon.nvim` |
+| Refactor / search-replace | `refactoring.nvim`, `nvim-spectre`, `inc-rename.nvim` |
+| Notes | `due.nvim`, `HighStr.nvim` |
+| Explorer / symbols | `neo-tree.nvim`, `vista.vim` |
+| Diagnostic lists | `trouble.nvim` |
+| LSP-adjacent | `nvim-rulebook`, `vim-log-highlighting` (log files have no syntax highlighting without it) |
+| Terminal / tasks | `officer.nvim`, `nredir.nvim` |
+| Misc | `vim-startuptime`, `hawtkeys.nvim`, `tuis.nvim`, `vim-be-good` |
 
-**Debugging** -- the largest single hole. `mfussenegger/nvim-dap`,
-`rcarriga/nvim-dap-ui`, `Weissle/persistent-breakpoints.nvim`. `<F4>` `<F5>`
-`<C-F5>` `<F6>` `<F8>` `<F9>` step/continue/stop, `mb` / `mB` breakpoint and
-conditional breakpoint, `[b` / `]b`, `<leader>fbb` `fbc` `fbv` `fbf` telescope
-pickers over breakpoints/configurations/variables/frames, `<leader>bb` dap-ui
-toggle, `<leader>bK` eval, `<leader>zb` / `<leader>bz` virtual text.
-
-**Testing** -- `nvim-neotest/neotest`. `<leader>ii` run, `iI` run all, `ix` stop,
-`id` debug, `ia` attach, `ip` preview, `io` open, `<leader>ei` picker, `]i` `[i`.
-
-**Diagnostic lists** -- `folke/trouble.nvim`. The whole `<leader>t*` family
-(`tt` `td` `tD` `tq` `tL` `tg` `tl` `tf`), `<leader>J` / `<leader>K` and `<M-j>`
-/ `<M-k>` next/prev, `gr` references. Two more trouble absences are listed
-under Gaps that are not a missing plugin, below.
-
-**Explorer and symbols** -- `nvim-neo-tree/neo-tree.nvim` (`<leader>ee` `eE`
-`eb` `eg`, `<leader>fe` `fE`), `liuchengxu/vista.vim` (`<leader>es` / `eS`, plus
-buffer-local `s`, `<leader>s`, `<leader>p`).
-
-**Refactoring and search-replace** -- `ThePrimeagen/refactoring.nvim`
-(`<leader>rr` `re` `rf` `rv` `ri` `rI` `rb` `rB`), `nvim-pack/nvim-spectre`
-(`<leader>r/` `r?` `rw`), `smjonas/inc-rename.nvim` (`<leader>rn`).
-
-**Notes** -- `MeanderingProgrammer/render-markdown.nvim`, `nfrid/due.nvim`,
-`Pocco81/HighStr.nvim` (`<leader>zh*` persistent highlights with export/import),
-`Avi-D-coder/whisper.nvim` (`<leader>ns` speech-to-text). obsidian.nvim,
-global-note.nvim, calendar-vim and markdown-preview.nvim are ported -- see Notes
-and journal, above.
-
-**Notebooks and data science** -- `quarto-dev/quarto-nvim`,
-`benlubas/molten-nvim`, `jmbuhr/otter.nvim`, `3rd/image.nvim`,
-`jbyuki/nabla.nvim`. Cell execution (`<leader>ii` `ij` `ik` `iI` `il`), kernel
-select (`<leader>wi`), math preview (`<leader>iP`), inline images.
-
-**Editing** -- `echasnovski/mini.align`, `chrisgrieser/nvim-recorder` (`q` `Q`
-`cq` `dq` `yq` plus `<leader>q` slot switch), `AllenDang/nvim-expand-expr`
-(`<leader>Q`), `mawkler/demicolon.nvim`. mini.surround is ported, in
-`plugins/surround.lua`.
-
-**LSP-adjacent** -- `VonHeikemen/lsp-zero.nvim` and `L3MON4D3/LuaSnip` are
-deliberate (native LSP), but note there is no snippet engine here at all.
-`chrisgrieser/nvim-rulebook` (`<leader>li` ignore rule, `lI` ignore formatter,
-`lF` lookup code, `lY` yank code). `Bilal2453/luvit-meta` was a lazydev
-dependency. `mtdl9/vim-log-highlighting`: `after/ftplugin/log.lua` only sets
-`commentstring`, so log files have no syntax highlighting.
-
-**Terminal and tasks** -- `pianocomposer321/officer.nvim` (`:Make` / `:Run`
-through overseer), `sbulav/nredir.nvim` (`<leader>oRR`, command output to a
-buffer).
-
-**Workspaces** -- `xvzc/chezmoi.nvim` (`<leader>wC` dotfile picker).
-
-**Misc** -- `dstein64/vim-startuptime`, `subnut/nvim-ghost.nvim` (edit browser
-textareas), `tris203/hawtkeys.nvim` (keymap conflict analysis), `jrop/tuis.nvim`
-(`<leader>fZ`), `theprimeagen/vim-be-good`.
-
-#### The non-plugin layers are done
-
-Diffed directly, so this does not need re-checking:
-
-- **Keymaps.** 42 old core mappings against 40 here; the only two the diff
-  reports are a `yc` that was commented out over there and the `<leader>ey*`
-  loop, which is a literal table here (`core/keymaps.lua`).
-- **Options.** Everything the old `set.lua` had and this one does not is either a
-  0.11 default (`incsearch`, `autoread`, `showcmd`, `autochdir`,
-  `termguicolors`, `netrw_banner`) or was already commented out there
-  (`backup`, `swapfile`, `hlsearch`, `clipboard`, `updatetime`).
-- **Autocmds and commands.** TermClose, terminal autoscroll with its claude
-  exemption, last-place, the checktime pair, formatoptions, json to jsonc, `.str`
-  to javascript, log and markdown `commentstring`, notes `conceallevel`,
-  `ClearShada` -- all here. The TimeDiff virtual text is the one real gap.
-- **env.** `DIR_LEET`, `VSC_CONFIG`, `GLOBAL_STATUS`, `PANEL_POSITION`,
-  `PRESENTING`, `SCREEN` and `SIDEBAR_POSITION` are not in `util/env.lua`.
-
-Not carried over at the repo level, deliberately: `scripts/`, `sounds/`,
-`vscode_config/`, and `lua/vsc/`. `Dockerfile`, `docker-compose.yml`,
-`.dockerignore` and `.devcontainer.json` are ported -- see Containers, above.
+The non-plugin layers are done, diffed directly: keymaps, options, autocmds and
+commands all came over. Not carried over at the repo level, deliberately:
+`scripts/`, `sounds/`, `vscode_config/`, `lua/vsc/`.
 
 ### Translating a spec
 
@@ -533,8 +502,7 @@ Not carried over at the repo level, deliberately: `scripts/`, `sounds/`,
 | `vim.fn.system` + `vim.v.shell_error` | `vim.system(...):wait()` |
 | `starts_with`, `merge_list` | `vim.startswith`, `vim.list_extend` |
 
-**Copy nerd-font icons by codepoint, not by retyping them.** Glyphs are easy to
-drop silently when moving code between files, and an empty icon string usually
+**Copy nerd-font icons by codepoint, not by retyping them.** An empty icon string
 fails quietly -- a blank statusline segment rather than an error. To check a
 ported file against its original:
 
@@ -552,19 +520,17 @@ EOF
 - **Treesitter highlighting is off.** `plugins/treesitter.lua` installs parsers
   and stops there, which is what the old config did too -- the `main` branch
   starts nothing by itself, so the theme's regex syntax is still what you see.
-  The parsers exist for the plugins that query the tree. One
-  `vim.treesitter.start()` in a `FileType` autocmd would switch it on.
-- **`lua/overseer/component/custom/task_formatter.lua`** is not ported. It is
-  absent from overseer's `component_aliases`, and depends on `beepboop` and the
-  old `config.overseer` module.
-- **The notes time-diff virtual text** (`lua/nvim/autocmd.lua`, the `TimeDiff`
-  augroup) is not ported. It belongs in `after/ftplugin/markdown.lua`.
+  One `vim.treesitter.start()` in a `FileType` autocmd would switch it on.
+- **The notes time-diff virtual text** (`nvim-old/lua/nvim/autocmd.lua`, the
+  `TimeDiff` augroup) is not ported. It belongs in `after/ftplugin/markdown.lua`.
 - **trouble.nvim absences**: telescope's `T` / `t` send-to-trouble mappings and
   `<leader>tT` (TodoTrouble) were dropped with it.
 - **`NVIM_CONTEXT` only selects the dashboard logo here.** In the old config it
   also set `SCREEN`, `PANEL_POSITION` and `PRESENTING`; those became local
-  constants in the files that used them, so the LSP indicator does not switch to
-  icon-plus-name on a widescreen context.
+  constants in the files that used them (e.g. `PANEL` in `plugins/overseer.lua`),
+  so the LSP indicator does not switch to icon-plus-name on a widescreen context.
+  `DIR_LEET`, `VSC_CONFIG`, `GLOBAL_STATUS` and `SIDEBAR_POSITION` are gone too.
+
 
 ## Future tasks
 
