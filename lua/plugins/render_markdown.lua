@@ -14,12 +14,9 @@ return {
       },
     },
     opts = {
-      -- Off until <leader>zp asks for it, so editing a note is the raw text and
-      -- rendering is a preview you turn on -- the same shape as <leader>zP.
-      -- The plugin's own default is to render every markdown buffer on open.
+      -- Off until <leader>zp asks; the plugin's default renders on open.
       enabled = false,
-      -- nabla owns equations, on the same key. render-markdown's LaTeX support
-      -- shells out to latex2text and would draw over the same expressions.
+      -- snacks draws the equations; this would put latex2text text over them.
       latex = { enabled = false },
     },
   },

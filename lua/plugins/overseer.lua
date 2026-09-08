@@ -111,8 +111,8 @@ local function sort_templates(items)
 end
 
 -- Only overseer's template picker sets this `kind`, so the wrapper is inert for
--- every other vim.ui.select. snacks owns vim.ui.select and installs it during
--- its own setup, which lazy runs first because snacks is a dependency here.
+-- every other vim.ui.select. It delegates to snacks, but `:checkhealth snacks`
+-- compares identity -- its "not set to `Snacks.picker.select`" is this wrapper.
 local function order_template_picker()
   local select = vim.ui.select
   vim.ui.select = function(items, opts, on_choice)
@@ -256,11 +256,8 @@ return {
         render = function(task)
           local render = require 'overseer.render'
           local lines = render[DETAIL_FORMATS[detail]](task)
-          -- All three built-in formats open with status_and_name. When a project
-          -- exrc defines _G.task_formatter, that label is what the lualine
-          -- indicator shows, so swap it in here too; with no hook set the
-          -- formatter falls back to the raw command, which reads worse than the
-          -- task name overseer already renders.
+          -- All three built-in formats open with status_and_name; swap in the
+          -- exrc label the lualine indicator uses.
           if tasks.has_formatter() then
             lines[1] = render.join(render.status(task), { { tasks.task_formatter(task), 'OverseerTask' } }, ': ')
           end

@@ -7,6 +7,9 @@
 -- json covers the jsonc filetype core/filetypes.lua sends .json files to --
 -- `vim.treesitter.language.get_lang 'jsonc'` resolves to json, and there is no
 -- separate jsonc parser to install.
+--
+-- latex is for rendering math, not editing .tex: it is the injected language
+-- snacks.image looks for to find equations.
 return {
   'bash',
   'c',
@@ -18,6 +21,7 @@ return {
   'http',
   'javascript',
   'json',
+  'latex',
   'lua',
   'markdown',
   'markdown_inline',

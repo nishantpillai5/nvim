@@ -104,9 +104,21 @@ servers through nvim-lspconfig's old setup path.
   disk as claudecode's terminal provider, so replacing it enabled two snacks
   modules rather than adding a plugin. Only `input` and `picker` are on --
   telescope is still the finder behind every mapping, and `picker` is here for
-  `vim.ui.select` alone. One thing the swap changed: `git_worktree.lua` dropped
-  its own nui centered float for the create prompt, because snacks.input floats
-  centered where dressing rendered at the cursor. There is one input style now.
+  `vim.ui.select` alone, with `image` off until `<leader>zp` asks for it. One
+  thing the swap changed: `git_worktree.lua` dropped its own nui centered float
+  for the create prompt, because snacks.input floats centered where dressing
+  rendered at the cursor. There is one input style now.
+- **snacks is `lazy = false, priority = 1000`,** which is what its own health
+  check asks for. On VeryLazy there was a window at startup where `vim.ui.input`
+  and `vim.ui.select` were still Neovim's own.
+- **Four `:checkhealth snacks` complaints here are expected**, and none is worth
+  chasing: every module this config does not use reports `setup {disabled}`,
+  including `image` before its first `<leader>zp`; `notifier` adds `is not ready`
+  on top of that, because nvim-notify has the job; `vim.ui.select is not set to
+  Snacks.picker.select` is `overseer.lua`'s template-ordering wrapper, which
+  delegates to snacks; and the missing parsers under image (`css`, `svelte`,
+  `vue`, `typst`, …) only matter for rendering images inside *those* filetypes.
+  `mmdc` is a real gap, but only for mermaid diagrams.
 
 ## Finder
 
@@ -153,27 +165,41 @@ first `<leader>n` mapping, and `plugins/calendar.lua`,
   already have one are marked. edgy docks it left by its `calendar` filetype.
 - **Two preview keys, both markdown-only.** `<leader>zP` is markdown-preview: the
   whole file as a web page in the browser. `<leader>zp` is everything in the
-  buffer, and drives three plugins at once through `util/markdown.lua` --
-  render-markdown for headings, tables, code blocks and checkboxes, snacks.image
-  for inline images, and nabla for LaTeX equations. Both keys are lazy `keys`
-  entries carrying `ft = 'markdown'`, which lazy maps buffer-locally on
-  `FileType` rather than globally -- so neither exists outside a markdown buffer,
-  while `:MarkdownPreview` and friends still work anywhere. nabla has no key of
-  its own; its spec is `ft`-only, which is what loads it in time for the toggle.
-- **All three start off,** where each plugin's own default renders on open -- so
-  a note is raw text until you ask, the same shape as `<leader>zP`. Each renderer
-  owns exactly one thing: render-markdown's `latex` is off and so is snacks'
-  `math`, because nabla draws the equations.
-- **The toggle's state is per buffer,** since snacks.image and nabla both attach
-  per buffer. render-markdown is the exception -- its toggle is global, so
-  `util/markdown.lua` mirrors it and only flips it when it disagrees with what
-  the current buffer wants, which leaves it following whichever buffer toggled
-  last.
+  buffer, and drives two plugins through `util/markdown.lua` -- render-markdown
+  for the text presentation (headings, tables, code blocks, checkboxes,
+  callouts), snacks.image for everything drawn as a picture (images, LaTeX
+  equations, mermaid). They do not overlap: snacks has no markdown text renderer
+  and render-markdown has no graphics protocol, so neither can replace the other.
+  Both keys are lazy `keys` entries carrying `ft = 'markdown'`, which lazy maps
+  buffer-locally on `FileType` rather than globally -- so neither exists outside
+  a markdown buffer, while `:MarkdownPreview` and friends still work anywhere.
+- **Both start off,** where each plugin's own default renders on open -- so a
+  note is raw text until you ask, the same shape as `<leader>zP`.
+  render-markdown's own `latex` is off, since snacks draws the equations.
+- **Math needs `tectonic` or `pdflatex`, plus the `latex` parser.** snacks
+  compiles each equation and converts the result to an image. The parser is how
+  the equations are found -- `markdown_inline/injections.scm` maps `latex_block`
+  to `latex` -- which is why `latex` is in `util/parsers.lua` despite no .tex
+  file ever being edited here. `:checkhealth snacks` reports both. A freshly
+  installed tectonic also has to download its package bundle on first run, and
+  snacks runs it async with the output swallowed -- so run tectonic once from a
+  shell, or a cold cache is indistinguishable from the feature not working.
+- **`xcolor` is added to snacks' math packages** in `plugins/snacks.lua`, and the
+  rest of its default list repeated because the option replaces rather than
+  extends. snacks' template emits `\color[HTML]{<hex>}` without loading xcolor,
+  so `\color` is an undefined control sequence -- and since tectonic runs with
+  `-Z continue-on-errors` the PDF is still written, with the colour dropped and
+  `[HTML]<hex>` typeset as literal black text in front of every equation.
+- **The toggle's state is per buffer,** and so is every plugin it drives:
+  `render-markdown.api.set_buf` and snacks' own per-buffer attach. The
+  `enabled = false` in the render-markdown and
+  snacks specs are *global* defaults -- they keep a note raw text until asked,
+  and neither blocks the per-buffer switch. Note the render-markdown API lives in
+  `render-markdown.api`, not the root module, which only exposes `setup`.
 - **Images need kitty, and nothing else.** snacks draws them with the Kitty
   Graphics Protocol (kitty, ghostty and wezterm only) and needs `magick` on PATH
   for anything that is not a PNG. Under tmux it sets `allow-passthrough` itself,
-  so there is no tmux.conf change to make. (snacks' math would also have wanted
-  `tectonic` or `pdflatex`, neither of which is installed here.)
+  so there is no tmux.conf change to make.
 - **Turning images off reopens the file, and that costs the buffer.** snacks.image
   has no detach -- `doc.attach` guards on a buffer-local flag that survives
   `:edit`, the inline renderer holds an `nvim_buf_attach` whose `on_lines`
@@ -465,9 +491,10 @@ already disabled, which are not gaps. Read the raw output with these corrections
   `dressing.nvim` (snacks owns `vim.ui.input` / `vim.ui.select`).
 - **Not planned**: `chezmoi.nvim`, `nvim-ghost.nvim`, and the quarto stack --
   `quarto-nvim` plus everything installed for it: `otter.nvim` and `molten-nvim`
-  (both quarto dependencies) and `3rd/image.nvim` (molten's). No notebook support
-  here. This is also why the Dockerfile drops ruby and imagemagick. `nabla.nvim`
-  came out of that group and is ported -- see Notes and journal.
+  (both quarto dependencies), `3rd/image.nvim` (molten's) and `nabla.nvim`. No
+  notebook support here, and snacks.image draws the inline images and equations
+  those would have covered -- see Notes and journal. This is also why the
+  Dockerfile drops ruby and imagemagick.
 
 That leaves 20 real gaps. Their keymaps are whatever `nvo` still binds:
 

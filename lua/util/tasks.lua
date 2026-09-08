@@ -36,9 +36,8 @@ function M.filter_run_tasks(task)
   return true
 end
 
--- True when a project exrc has defined its own task label. Without one the
--- formatter falls back to the command, which is what the lualine indicator
--- wants but not the task list, where overseer already renders a task name.
+-- Without a hook the formatter falls back to the command, which suits the
+-- lualine indicator but not the task list, where overseer renders a name.
 function M.has_formatter()
   return _G.task_formatter ~= nil
 end
