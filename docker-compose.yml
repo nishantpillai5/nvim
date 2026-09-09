@@ -34,6 +34,12 @@ services:
       # core/options.lua reads this and routes the `"+` maps through OSC 52, since
       # a container has no display server for xclip to talk to.
       NVIM_CONTAINER: '1'
+      # snacks.image detects the terminal by escape handshake and by asking tmux;
+      # from in here it can do neither, so name them outright. Needs
+      # `set -g allow-passthrough on` in the host's tmux.conf -- the container
+      # cannot run the `tmux set -p` that snacks would normally do itself.
+      SNACKS_KITTY: '1'
+      SNACKS_TMUX: '1'
       # Passed through when set, so `claude` works without an interactive login.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'

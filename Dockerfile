@@ -11,7 +11,8 @@ FROM archlinux:base
 # tree-sitter-cli and a compiler are not optional here: nvim-treesitter's `main`
 # branch builds every parser in util/parsers.lua from source. git-delta is what
 # telescope's diff previewer uses when it is on PATH, and npm/pip/go/cargo are
-# what :MasonInstallAll builds its packages with.
+# what :MasonInstallAll builds its packages with. imagemagick and ghostscript are
+# snacks.image's: it shells out to `magick`, which reads PDFs through gs.
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
       base-devel \
@@ -20,10 +21,12 @@ RUN pacman -Syu --noconfirm && \
       fd \
       fzf \
       gcc \
+      ghostscript \
       git \
       git-delta \
       go \
       gzip \
+      imagemagick \
       lazygit \
       make \
       neovim \

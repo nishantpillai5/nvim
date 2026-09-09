@@ -796,8 +796,8 @@ end
 -- terminal input is untouched, which holds when you pop the box open to answer.
 -- Both scrapers below anchor within a few lines of the terminal's bottom and
 -- never look back further than ~70 (the question scraper's `hint - 60` bound),
--- but a terminal carries 10k lines of scrollback by default. Fetch a tail with
--- room to spare rather than copying the whole buffer into Lua on every
+-- but a terminal carries up to 'scrollback' lines -- 1M, per core/options.lua.
+-- Fetch a tail with room to spare rather than copying the whole buffer on every
 -- <leader><leader> -- which happened twice per press when no question was found.
 -- Every index below is relative to this tail, which is why the bound matters.
 local SCRAPE_TAIL_LINES = 200

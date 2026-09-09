@@ -288,7 +288,7 @@ return {
         default = {
           'on_exit_set_status',
           'on_complete_notify',
-          'on_complete_dispose',
+          { 'on_complete_dispose', timeout = 1800 },
           -- local component: lua/overseer/component/custom/vscode_env.lua
           'custom.vscode_env',
         },

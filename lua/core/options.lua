@@ -38,6 +38,10 @@ vim.o.inccommand = 'split'
 -- Scrolling
 vim.o.scrolloff = 8
 
+-- Terminal scrollback, at the 1000000 maximum (the -1 default resolves to
+-- 10000). Lines are allocated as they arrive, so quiet terminals cost nothing.
+vim.o.scrollback = 1000000
+
 -- Completion
 vim.o.completeopt = 'menu,menuone,noselect,fuzzy,popup'
 vim.o.pumheight = 12

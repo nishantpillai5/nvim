@@ -45,6 +45,7 @@ return {
           { '<leader>oR', group = 'Run_Cmd' },
           { '<leader>ow', group = 'Save' },
           { '<leader>r', group = 'Refactor', mode = { 'n', 'v' } },
+          { '<leader>t', group = 'Trouble' },
           { '<leader>V', group = 'Surround' },
           { '<leader>w', group = 'Workspace' },
           { '<leader>ww', group = 'Worktree' },

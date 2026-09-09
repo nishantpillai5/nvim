@@ -47,7 +47,7 @@ local bottom = {
 
 local left = {
   { title = 'Explorer (Neotree)', ft = 'neo-tree', size = { width = SIZES.left_width_2 } },
-  { title = 'Symbols (Vista)', ft = 'vista', size = { width = SIZES.left_width_2 } },
+  { title = 'Symbols (Aerial)', ft = 'aerial', size = { width = SIZES.left_width_2 } },
   { title = 'Scopes (DAP)', ft = 'dapui_scopes', size = { width = SIZES.left_width_3 } },
   { title = 'Breakpoints (DAP)', ft = 'dapui_breakpoints', size = { width = SIZES.left_width_3 } },
   { title = 'Stacks (DAP)', ft = 'dapui_stacks', size = { width = SIZES.left_width_3 } },

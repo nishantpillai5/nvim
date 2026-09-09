@@ -75,9 +75,20 @@ servers through nvim-lspconfig's old setup path.
 
 ## Notes on ported plugins
 
-- `lua/plugins/edgy.lua` keeps layout slots for plugins that aren't here yet
-  (trouble, neo-tree, vista). An `ft` that never appears never matches, so each
-  panel starts docking as soon as its plugin lands.
+- `lua/plugins/edgy.lua` has a slot for every plugin it names again, trouble
+  having been the last one waiting. Five of those slots share `ft = 'trouble'`
+  and split it by mode through `trouble_mode_is()`, so diagnostics and the
+  qf/loclist lists dock at the bottom while lsp and telescope go to the side --
+  which is why `plugins/trouble.lua` sets no window options of its own.
+- `lua/plugins/trouble.lua` departs from the old config twice. `auto_refresh`
+  keeps its default instead of being switched off, so an open list follows the
+  fixes rather than going stale -- the reason to run a docked list at all. And
+  references moved from `gr` to `<leader>tr`, because 0.11 owns the `gr*` prefix
+  now and rebinding `gr` itself would shadow the whole group. The `<leader>J` /
+  `<leader>K` pair the old config used for next/prev is treesj's `code_join`
+  here, so only `<M-j>` / `<M-k>` came over. Its `BufRead` takeover lives in
+  `init` rather than `config`: registered any later, the first `:copen` of a
+  session would beat the plugin to the window.
 - `lua/plugins/lualine.lua` is the single `lualine.setup` call. The old config
   called it four times, grafting components on from `lsp_zero.lua`, `lint.lua`
   and `noice.lua`; those components are defined inline there instead.
@@ -99,6 +110,15 @@ servers through nvim-lspconfig's old setup path.
   `plugins/whichkey.lua`, next to trailblazer's. mini installs its own mappings
   from `opts.mappings` when it loads, replacing lazy's key stubs and their
   `desc`, so the spec's `keys` labels only ever show before the first use.
+- `lua/plugins/grug_far.lua` stands in for nvim-spectre, on spectre's own keys
+  (`<leader>r/` in file, `<leader>r?` toggle, `<leader>rw` word or selection).
+  spectre has been quiet since May 2025; grug-far does the same search and
+  replace in one buffer and adds an ast-grep engine beside ripgrep. Two
+  differences worth knowing: `<leader>r?` toggles a single named instance,
+  closest to spectre's one panel, where grug-far otherwise opens a buffer per
+  search; and its own keymaps hang off `<localleader>`, which `init.lua` sets to
+  space, so inside a grug-far buffer `<leader>r` is replace, `<leader>c` close
+  and `<leader>q` qflist, shadowing those global groups for that buffer.
 - `lua/plugins/snacks.lua` provides `vim.ui.input` and `vim.ui.select`, which
   dressing.nvim used to. dressing is archived upstream and snacks was already on
   disk as claudecode's terminal provider, so replacing it enabled two snacks
@@ -108,9 +128,92 @@ servers through nvim-lspconfig's old setup path.
   thing the swap changed: `git_worktree.lua` dropped its own nui centered float
   for the create prompt, because snacks.input floats centered where dressing
   rendered at the cursor. There is one input style now.
+- **The symbol outline is aerial,** in the sidebar slot vista used to hold --
+  `ft = 'aerial'` in `plugins/edgy.lua`, under the tree, and `aerial` in
+  lualine's `IGNORE_FTS` for the same focus reason as neo-tree. `<leader>es`
+  opens and focuses it, `<leader>eS` is the floating nav window. The command
+  takes a bang to *not* focus (`focus = not params.bang`), so the plain
+  `:AerialToggle` is the one bound. `attach_mode = 'global'` gives one pane
+  tracking the current buffer rather than aerial's default of one per window,
+  which is what a single docked sidebar wants.
+- **`<C-h>` / `<C-j>` / `<C-k>` / `<C-l>` are freed in every docked panel,** and
+  aerial was the one that needed it next: it binds `<C-j>` and `<C-k>`
+  buffer-locally to its scroll actions, and a buffer-local map beats the global
+  tmux-navigation one, so inside the outline up and down stopped moving between
+  windows while left and right still worked. `false` is how aerial drops a
+  default keymap (`if rhs then` in its `keymap_util`), the scroll pair moves to
+  `J` / `K`, and its `<C-s>` / `<C-v>` jumps move to `s` / `v` -- the same
+  letters the task list and the tree use. `plugins/overseer.lua` already did
+  exactly this for the same four keys.
+- **Aerial's backends need no plugin of their own.** Its default order is
+  treesitter first, then LSP, and its treesitter backend talks to core
+  `vim.treesitter` with its own vendored helpers -- there is no
+  `require('nvim-treesitter')` anywhere in it, so the `main` pin is irrelevant
+  to it and only the installed parsers matter. It ships queries for nearly all
+  of `util/parsers.lua`, markdown included, so a note outlines by heading; where
+  a parser is missing it falls through to the language server. navic stays as it
+  was, rendering nothing -- `show_navic = false` in `plugins/barbecue.lua` --
+  since a breadcrumb of the path to the cursor is a different question from a
+  pane you can browse. Turning it on is that one flag.
+- **The file tree is neo-tree, because edgy has to be able to dock it.** The
+  tree and the outline stack in one edgebar -- `neo-tree` above `aerial` in
+  `plugins/edgy.lua`, in that order -- which is the layout the old config had
+  and the reason snacks.explorer is not doing this job. snacks' explorer is a
+  picker: its list and input live inside a `snacks_layout_box` that snacks
+  positions itself on every layout update, so edgy has nothing it can stack, and
+  an edgy entry for `snacks_picker_list` would both fight that layout manager
+  and catch every `vim.ui.select` popup, which shares the filetype. It stays a
+  module this config does not enable.
+- **Keys are the old config's,** minus the two that needed a directory picker:
+  `<leader>ee` reveals the current file, `<leader>eE` re-roots at cwd (worth
+  having next to `<leader>ew`, which moves cwd, since `bind_to_cwd = false`
+  keeps the root where it was), `<leader>eb` is the buffers source and
+  `<leader>eg` the git one, where `s` / `u` / `c` stage, unstage and commit. The
+  old `<leader>fe` / `<leader>fE` opened the tree at a favourite directory from
+  `_G.fav_dirs`; no `fav_dirs` was ported, so neither is here. oil still owns
+  `<leader>ef` -- a directory as an editable buffer is a different tool.
+- **`hijack_netrw_behavior = 'disabled'`,** so `<leader>eF` is still netrw, and
+  `open_files_do_not_replace_types` gained `aerial`: the outline docks right
+  beside the tree, so without it a file opened from the tree would land there.
+  `system_open` (`o`) is `vim.ui.open` now, as `<leader>eO` is.
+- **The old config's `zz`-on-enter autocmd is not ported, because it never
+  ran.** It was `BufEnter` with `pattern = 'neo-tree'`, and an autocmd pattern
+  matches the buffer *name* -- neo-tree names its buffers
+  `neo-tree filesystem [1]`, which that pattern never matches. `neo-tree` is in
+  lualine's `IGNORE_FTS` for the TelescopePrompt reason, and `<leader>av`
+  already reached tree entries: it was in the `ai_attach_tree` pattern in
+  `core/keymaps.lua` all along, next to `snacks_picker_list`, which stays for
+  claudecode's reading of a modal picker selection.
 - **snacks is `lazy = false, priority = 1000`,** which is what its own health
   check asks for. On VeryLazy there was a window at startup where `vim.ui.input`
   and `vim.ui.select` were still Neovim's own.
+- `lua/plugins/demicolon.lua` loads on `VeryLazy`, where the old config had
+  `keys = { ']', '[' }`. The whole plugin is a `vim.on_key` listener recording
+  the last `]`/`[` motion so `;` and `,` can re-feed it, so it has to be
+  watching *before* the jump it repeats -- on `keys` the first bracket motion of
+  a session is never recorded. A lazy stub on `]` is also a mapping that is a
+  prefix, the `<leader>g` case, so it would sit `timeoutlen` in front of `]c`,
+  `]t`, `]i`, `]b` and `]x`. Because it re-feeds keys rather than wrapping each
+  mapping, every one of those repeats with no per-spec work, as do the built-in
+  `]d`, `]q`, `]s` and `]z`.
+- **`disabled_keys` drops upstream's `i`.** Its default list is the `]`-pairs
+  that are not motions -- `]p`, `]I`, `]A`, plus `]f` for textobjects' own move
+  -- and it includes `]i`, the built-in "show first line with this keyword".
+  Here `]i` is neotest's next failed test, so the list is `{ 'p', 'I', 'A', 'f' }`
+  and `;` repeats it. (`vim.tbl_deep_extend` replaces a list rather than merging
+  it index by index, so the shorter override really does drop `i`.)
+- **nvim-treesitter-textobjects rides along as a dependency,** pinned to `main`
+  like treesitter itself. Every demicolon module hard-requires its
+  `repeatable_move` -- the `pcall` is only for the old module path, the fallback
+  `require` is bare -- and that module is where the last jump is stored, so
+  without it demicolon throws inside `on_key` on every bracket press. On `main`
+  `repeatable_move.lua` has no requires and needs no setup, so nothing else of
+  textobjects is switched on and no textobject mappings appear.
+- **`;` is always forward and `,` always backward** (`repeat_motions =
+  'stateless'`, upstream's default and what the old config took). Neovim's own
+  `,` instead reverses the direction of the last `f`/`t`; `'stateful'` restores
+  that. f/F/t/T are remapped in n/x/o either way -- that is how an f-jump gets
+  recorded.
 - **Four `:checkhealth snacks` complaints here are expected**, and none is worth
   chasing: every module this config does not use reports `setup {disabled}`,
   including `image` before its first `<leader>zp`; `notifier` adds `is not ready`
@@ -129,7 +232,8 @@ Features that lost their backing plugin in this config:
 
 - `merge_from_branch` and `reset_file_to_*` ran fugitive's `:Git`. They now shell
   out with `vim.system`, so they work without fugitive.
-- The telescope picker mappings `T`/`t` sent results to trouble.nvim; dropped.
+- The telescope picker mappings `T`/`t` send results to trouble -- `T` replaces
+  the list, `t` adds to it, and `<leader>tf` reopens it.
 - The diff previewer only adds `delta` to the git command when delta is on PATH.
 
 ## Git
@@ -146,7 +250,8 @@ Features that lost their backing plugin in this config:
 The vault is `util.env`'s `DIR_NOTES` (`~/notes` unless the environment says
 otherwise). `plugins/obsidian.lua` loads for markdown files under it, or on the
 first `<leader>n` mapping, and `plugins/calendar.lua`,
-`plugins/global_note.lua` and `plugins/markdown_preview.lua` sit beside it.
+`plugins/global_note.lua`, `plugins/markdown_preview.lua` and `plugins/due.lua`
+sit beside it.
 
 - **With the vault as cwd, four general finders become obsidian's**:
   `<leader>ff`, `<leader>?`, `<leader>fs` and `<leader>fS` are re-bound in
@@ -234,6 +339,22 @@ first `<leader>n` mapping, and `plugins/calendar.lua`,
   (`project.<dir>.<branch>.md`, non-word characters replaced). `util.git.branch()`
   supplies the branch and returns nil on a detached HEAD, which global-note reads
   as "no note".
+- **due.nvim only draws in a todo file.** `plugins/due.lua` lists the four names
+  it answers to -- `todo.md`, `todo.txt` and their uppercase spellings -- once,
+  and builds both lazy's load events and the plugin's own `ft` from that list.
+  They are autocmd *file patterns*, not filetypes: `todo.txt` has no filetype,
+  and the two cases are separate names on the container's filesystem. A pattern
+  with no `/` matches the tail, so any directory's `todo.md` counts, but
+  `work-todo.md` and every other note does not -- the old config's `*todo*.md`
+  was wider. Left at its own default the plugin would attach to every `*.md`,
+  i.e. the whole vault.
+- **The date is written `due: 2026-04-15`,** not the plugin's default
+  `<2026-04-15>`; a bare `04-15` means this year. `pattern_start` and
+  `pattern_end` are literal text spliced around the date pattern rather than
+  regexes, so the space after the colon lives inside `pattern_start` and
+  `pattern_end` is empty. The virtual text at the end of the line is the
+  countdown alone (`3m 2w 2d`, `TODAY`, `OVERDUE`) -- `prescript` is a single
+  space, since the line already reads "due:".
 
 ## Scopes and sessions
 
@@ -401,9 +522,11 @@ What changed on the way over:
   builds every parser in `util/parsers.lua` from source, so it and a compiler are
   load-bearing rather than leftovers.
 - **`git-delta` added**, since telescope's diff previewer uses it when it is on
-  PATH. **`yarn`, `ruby` and `imagemagick` dropped** -- yarn built
-  markdown-preview's server, which now arrives as a prebuilt binary over curl,
-  and ruby and imagemagick were image.nvim's, which did not come over.
+  PATH. **`yarn` and `ruby` dropped** -- yarn built markdown-preview's server,
+  which now arrives as a prebuilt binary over curl, and ruby was image.nvim's,
+  which did not come over. `imagemagick` was dropped with it and has since come
+  back, together with `ghostscript`: snacks.image shells out to `magick`, which
+  reads tectonic's PDFs through `gs`.
   `pacman -Scc` would have taken the sync database with the package cache, so the
   cleanup is `rm -rf /var/cache/pacman/pkg/*` instead.
 - **`$HOME/notes` is mounted**, which it was not before: obsidian's `event`
@@ -437,6 +560,12 @@ in `core/lsp.lua`'s `MASON_PACKAGES` fails the build rather than the editor.
   `ANTHROPIC_API_KEY` is passed through when it is set in the host environment.
   A volume rather than a bind of the real `~/.claude` -- the same call
   `.devcontainer.json` makes.
+- **snacks.image is told what terminal it is in.** It normally detects kitty with
+  an escape handshake and tmux from `$TMUX`, and can do neither through docker --
+  so compose sets `SNACKS_KITTY` and `SNACKS_TMUX`, the overrides snacks checks
+  first. The host's tmux.conf needs `set -g allow-passthrough on` to go with
+  them, since the container cannot run the `tmux set -p` snacks does itself.
+  Equations additionally want `tectonic`, which is not in the image.
 - **The `"+` maps work through OSC 52.** A container has no display server, so
   xclip would have nothing to talk to; compose sets `NVIM_CONTAINER`, and
   `core/options.lua` turns that into `vim.g.clipboard = 'osc52'`, which hands the
@@ -486,6 +615,8 @@ already disabled, which are not gaps. Read the raw output with these corrections
 
 - **Ported under a fork, so not missing**: `folke/todo-comments.nvim`,
   `f-person/git-blame.nvim`, `norcalli/nvim-colorizer.lua`.
+- **Ported under a different plugin**: `nvim-spectre`, as `grug-far.nvim` -- see
+  Notes on ported plugins.
 - **Dropped on purpose**: `lsp-zero` and `LuaSnip` (native LSP -- but note there
   is no snippet engine here at all), `luvit-meta` (obsolete lazydev dep),
   `dressing.nvim` (snacks owns `vim.ui.input` / `vim.ui.select`).
@@ -495,19 +626,119 @@ already disabled, which are not gaps. Read the raw output with these corrections
   notebook support here, and snacks.image draws the inline images and equations
   those would have covered -- see Notes and journal. This is also why the
   Dockerfile drops ruby and imagemagick.
+- **Not planned, superseded**: `hawtkeys.nvim`. `:checkhealth which-key` now
+  reports duplicate mappings and overlapping keymaps -- the `<leader>g`
+  mapped-and-a-prefix case that `timeoutlen` makes visible -- which is all
+  `:HawtkeysDupes` did, and it does it from the live keymap table, so it also
+  sees plugin, ftplugin and built-in mappings that hawtkeys' parser never
+  reaches. What is genuinely lost: `:Hawtkeys` proposing an unused combo scored
+  for the layout (home row, finger travel, same hand or alternating), and the
+  static tree-sitting of lazy `keys` specs, which catches collisions between
+  two specs that never load in the same session. Not worth a plugin -- and its
+  `whichkey.register` matcher targets the v2 API anyway, so it would need a
+  `custom_maps` entry to see anything `wk.add` registers here.
+- **Not planned, superseded**: `inc-rename.nvim`. All it adds over
+  `vim.lsp.buf.rename` -- already on `<leader>lr`, `<leader>rl` and 0.11's `grn`
+  -- is a live preview of the rename as you type. `inccommand` is `split` here
+  so the preview would work; it also wanted the noice `inc_rename` preset the
+  old config set and this one does not. Not worth a plugin for the preview.
+- **Not planned, superseded**: `refactoring.nvim`, which was two plugins in one.
+  Its debug-print half is debugprint.nvim, already here with a wider
+  `<leader>gc*` surface including search, toggle, delete and reset. Its extract
+  and inline half is what `<leader>la` code actions already do wherever the
+  server implements them -- rust-analyzer, vtsls, gopls, clangd and jdtls all
+  ship extract to function and extract variable. That leaves treesitter-driven
+  extract for the servers that do not, mainly pyright and lua_ls: reconsider if
+  Python or Lua refactoring starts hurting. Note the old spec had already
+  drifted -- `M.keys` in `config/refactoring.lua` declares `<leader>rb` /
+  `<leader>rB` and mode `x`, while `M.keymaps` binds `<leader>rbb` /
+  `<leader>rbf` in `{ n, x }`, so those which-key labels were wrong before the
+  port.
+- **Not planned, superseded**: `vim-log-highlighting`. It was upstreamed -- the
+  runtime ships its syntax file as `$VIMRUNTIME/syntax/log.vim`, crediting MTDL9
+  as former maintainer, and the runtime copy is ahead of the plugin: revision
+  2025-10-31 at 222 lines against the plugin's 2020-08-23 at 161. Installing it
+  would put the 2020 file earlier in the runtimepath and shadow the maintained
+  one. Detection is what it still covered, and that is now two patterns in
+  `core/filetypes.lua`: the runtime's `log` extension entry runs `detect.log`,
+  which resolves only `upstream`, `upstreaminstall`, `usserver` and `usw2kagt`
+  logs and leaves a plain `app.log` with no filetype at all -- so nothing ever
+  loaded the syntax file, which is what the old note here meant by log files
+  having no highlighting. The plugin's ftdetect also claimed `*_log` / `*_LOG`,
+  which the runtime never has. Both are covered at `priority = -10`, checked
+  only after the extension table, so those four vendor filetypes still win.
+- **Not planned, the builtins cover it**: `vim-startuptime`. It is a viewer over
+  `nvim --startuptime <file>`, which is built in, and for a Lua config that log
+  barely resolves anything: the whole config arrives as one `sourcing init.lua`
+  line whose self time dwarfs every `require()` line under it. `:Lazy profile`
+  is what splits that block apart -- per-plugin load, each spec's `config` /
+  `opts`, and the whole `require` tree, since `core/lazy.lua` runs near the top
+  of `init.lua` and lazy hooks `require` from there on. The two together cover
+  everything vim-startuptime shows, because it parses the same log. What is
+  lost: averaging over `startuptime_tries` runs (10 in the old config) and its
+  sorted table -- a shell loop over `--startuptime`, or hyperfine, averages.
+- **Not planned, superseded**: `HighStr.nvim`. Highlighting in a note is
+  `==text==`, which obsidian already renders -- `ui.highlight_text` conceals the
+  `==` pairs and paints the middle `ObsidianHighlightText`, and `ui.enable` is
+  true here -- and unlike HighStr's nine colour slots it is text in the file
+  that Obsidian itself and every other markdown reader understand. What is lost:
+  marking up a *code* buffer for the length of a session without touching its
+  contents. Upstream has also had no commit since October 2022.
+- **Not planned**: `nredir.nvim`. `:Nredir <ex command>` is
+  `:put =execute('<cmd>')`, and `<leader>oRR`'s `:Nredir !<shell>` is `:r !cmd`
+  -- or `<leader>oRr` (`:OverseerShell`), when the output is worth a task with a
+  status and a scrollback. noice also has `require('noice').redirect(<cmd>)`,
+  which routes a command's output to a split.
+- **Not planned, the formatters undo it**: `mini.align`. Nothing here aligns
+  text, so it is a real gap in the literal sense -- but stylua collapses an
+  aligned Lua table back to one space per `=`, trailing comments included, and
+  prettier pads a markdown table into aligned columns by itself, so across every
+  filetype in conform's `formatters_by_ft` one `<leader>ls` either erases the
+  alignment or had already done it. What is left is the `['_']` filetypes, where
+  only `trim_whitespace` runs -- yaml, shell, vim, sql, plain text, project
+  config -- and `:'<,'>!column -t` covers those. If it ever comes in, it goes in
+  the mini.surround shape: `version = '*'`, `ga` / `gA` in `{ n, x }` with the
+  descriptions in `whichkey.lua`, since mini replaces lazy's key stubs at load.
+- **Not planned**: `nvim-recorder`. `q` and `@` already record and replay. What
+  it added was three named slots with `<leader>q` to switch between them, macro
+  breakpoints, and two tabline components grafted on by a second
+  `lualine.setup` -- the pattern this config folded into one call. Worth knowing
+  what goes with it: there is now no recording indicator at all, because noice's
+  default routes `skip` `msg_showmode`, which is where Neovim's own
+  `recording @q` lives. Getting that back is a lualine component beside the
+  noice command one in `plugins/lualine.lua` -- `require('noice').api.status.mode`
+  -- rather than a plugin.
+- **Not planned**: `nvim-expand-expr`. Its one trick was expanding a templated
+  line into many: `10|print({%d})` became ten `print(n)` lines, with `{%d}`
+  evaluated as Lua, on `<leader>Q`. Duplicating a line and running `g<C-a>` down
+  a visual block numbers it natively -- dial.nvim only remaps normal-mode
+  `<C-a>` / `<C-x>`, so the visual sequence increment is still Neovim's -- and
+  anything past that is a `:lua` loop or `:put =`. Upstream last saw a commit in
+  August 2021.
+- **Not planned, superseded**: `vista.vim`. aerial.nvim is the outline now --
+  see Notes on ported plugins. vista is Vimscript, ctags-first with LSP bolted
+  on, and last saw a commit in December 2024; aerial is maintained, is by the
+  author of four plugins already here, and works from treesitter parsers when no
+  server is attached. What is lost is vista's ctags backend, i.e. an outline in
+  a filetype with neither a parser nor a server.
+- **Not planned**: `officer.nvim`. It is a hundred lines over the overseer
+  already here: `:Run {cmd}` is `<leader>oRr` (`:OverseerShell`), and running a
+  task from a template is `<leader>or` / `<leader>ob` / `<leader>oo`. What only
+  it does is `:Make`, splicing args into `makeprg`'s `$*` and parsing the output
+  through `vim.o.efm` into the quickfix list -- nothing in overseer v2 reads
+  `makeprg`. But no `makeprg` is ever set, here or in the old config, where the
+  spec sat `cmd`-lazy behind a TODO about setting one, so nothing ever invoked
+  it. It would still load (v2 keeps `overseer.new_task` and the three builtin
+  components it asks for, and its own `overseer/component/officer/*` resolve by
+  `require`); if `:Make` is ever wanted it is a `new_task` with
+  `expandcmd(vim.o.makeprg)` and `on_output_quickfix`, in `plugins/overseer.lua`
+  with the rest of the overseer behaviour.
 
-That leaves 20 real gaps. Their keymaps are whatever `nvo` still binds:
+That leaves 2 real gaps. Their keymaps are whatever `nvo` still binds:
 
 | Group | Plugins |
 | --- | --- |
-| Editing | `mini.align`, `nvim-recorder`, `nvim-expand-expr`, `demicolon.nvim` |
-| Refactor / search-replace | `refactoring.nvim`, `nvim-spectre`, `inc-rename.nvim` |
-| Notes | `due.nvim`, `HighStr.nvim` |
-| Explorer / symbols | `neo-tree.nvim`, `vista.vim` |
-| Diagnostic lists | `trouble.nvim` |
-| LSP-adjacent | `nvim-rulebook`, `vim-log-highlighting` (log files have no syntax highlighting without it) |
-| Terminal / tasks | `officer.nvim`, `nredir.nvim` |
-| Misc | `vim-startuptime`, `hawtkeys.nvim`, `tuis.nvim`, `vim-be-good` |
+| Misc | `tuis.nvim`, `vim-be-good` |
 
 The non-plugin layers are done, diffed directly: keymaps, options, autocmds and
 commands all came over. Not carried over at the repo level, deliberately:
@@ -550,8 +781,6 @@ EOF
   One `vim.treesitter.start()` in a `FileType` autocmd would switch it on.
 - **The notes time-diff virtual text** (`nvim-old/lua/nvim/autocmd.lua`, the
   `TimeDiff` augroup) is not ported. It belongs in `after/ftplugin/markdown.lua`.
-- **trouble.nvim absences**: telescope's `T` / `t` send-to-trouble mappings and
-  `<leader>tT` (TodoTrouble) were dropped with it.
 - **`NVIM_CONTEXT` only selects the dashboard logo here.** In the old config it
   also set `SCREEN`, `PANEL_POSITION` and `PRESENTING`; those became local
   constants in the files that used them (e.g. `PANEL` in `plugins/overseer.lua`),
@@ -577,10 +806,11 @@ Created on attach, so absent until then:
   repo the `]` menu simply has no `c`. Only `<leader>gB` is a lazy `keys` stub.
   Spec entries for `]c` / `[c` would advertise them everywhere, at the cost of
   the label being a small lie in buffers where the key does nothing.
-- **LSP** maps `<leader>l*`, `<leader>r*` and `gr*` from `core/lsp.lua` on
-  `LspAttach`. Consequence: the `<leader>r` Refactor group declared in
-  `whichkey.lua` is an empty menu in every buffer without a server -- the
-  caveat the group list's own header comment describes.
+- **LSP** maps `<leader>l*`, `<leader>rl` and `gr*` from `core/lsp.lua` on
+  `LspAttach`. The `<leader>r` Refactor group declared in `whichkey.lua` used to
+  be the empty menu its header comment warns about in every buffer without a
+  server; grug-far's `<leader>r/`, `<leader>r?` and `<leader>rw` are lazy `keys`,
+  so now only `rl` is missing there.
 
 Installed by the plugin with no `desc`:
 

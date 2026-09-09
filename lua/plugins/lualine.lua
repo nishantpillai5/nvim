@@ -9,8 +9,20 @@ local EXCLUDED_FTS = { 'toggleterm', 'TelescopePrompt', 'oil' }
 
 -- Windows that shouldn't take statusline focus. Without TelescopePrompt here the
 -- global statusline follows focus into the picker and shows the prompt buffer
--- instead of the file you were in. Add 'trouble' / 'neo-tree' if those land.
-local IGNORE_FTS = { 'TelescopePrompt', 'OverseerList', 'fugitive', 'oil', 'dashboard', 'qf' }
+-- instead of the file you were in; the snacks_picker entries are the same case
+-- for whatever vim.ui.select opens. Add 'trouble' if it lands.
+local IGNORE_FTS = {
+  'TelescopePrompt',
+  'snacks_picker_list',
+  'snacks_picker_input',
+  'neo-tree',
+  'aerial',
+  'OverseerList',
+  'fugitive',
+  'oil',
+  'dashboard',
+  'qf',
+}
 
 local LSP_ICONS = {
   lua_ls = '󰢱',

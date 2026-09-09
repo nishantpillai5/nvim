@@ -75,7 +75,7 @@ end, { desc = 'attach_visual' })
 
 vim.api.nvim_create_autocmd('FileType', {
   group = vim.api.nvim_create_augroup('ai_attach_tree', { clear = true }),
-  pattern = { 'NvimTree', 'neo-tree', 'oil', 'minifiles', 'netrw' },
+  pattern = { 'snacks_picker_list', 'NvimTree', 'neo-tree', 'oil', 'minifiles', 'netrw' },
   desc = 'attach the tree entry under the cursor to the active AI backend',
   callback = function()
     map('n', '<leader>av', function()

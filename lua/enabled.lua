@@ -25,6 +25,8 @@ return {
   'b0o/schemastore.nvim',
   'stevearc/conform.nvim',
   'mfussenegger/nvim-lint',
+  'chrisgrieser/nvim-rulebook',
+  'folke/trouble.nvim',
 
   -- UI ------------------------------------------------------------------------
   'nvim-tree/nvim-web-devicons',
@@ -44,6 +46,7 @@ return {
   -- Editing -------------------------------------------------------------------
   'chrisgrieser/nvim-spider',
   'smoka7/hop.nvim',
+  'mawkler/demicolon.nvim',
   'LeonHeidelbach/trailblazer.nvim',
   'monaqa/dial.nvim',
   'windwp/nvim-autopairs',
@@ -58,11 +61,14 @@ return {
   'catgoose/nvim-colorizer.lua',
   'folke/zen-mode.nvim',
   'alexghergh/nvim-tmux-navigation',
+  'MagicDuck/grug-far.nvim',
 
   -- Files and navigation ------------------------------------------------------
+  'nvim-neo-tree/neo-tree.nvim',
   'stevearc/oil.nvim',
   'cbochs/grapple.nvim',
   'rgroli/other.nvim',
+  'stevearc/aerial.nvim',
 
   -- Finder --------------------------------------------------------------------
   'nvim-telescope/telescope.nvim',
@@ -96,6 +102,7 @@ return {
   'MeanderingProgrammer/render-markdown.nvim',
   'backdround/global-note.nvim',
   'mattn/calendar-vim',
+  'nfrid/due.nvim',
   'Avi-D-coder/whisper.nvim',
 
   -- AI ------------------------------------------------------------------------

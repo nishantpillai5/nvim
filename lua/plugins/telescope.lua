@@ -496,8 +496,16 @@ return {
         actions.close(prompt_bufnr)
       end
 
-      -- The old config also bound T/t here to send results to trouble.nvim,
-      -- which isn't part of this config.
+      -- T replaces trouble's list with these results, t adds to it. Reached
+      -- again with <leader>tf, which opens trouble's `telescope` mode.
+      local open_with_trouble = function(opts)
+        require('trouble.sources.telescope').open(opts)
+      end
+
+      local add_to_trouble = function(opts)
+        require('trouble.sources.telescope').add(opts)
+      end
+
       local defaults = {
         follow = true,
         path_display = { filename_first = { reverse_directories = true } },
@@ -505,6 +513,8 @@ return {
         mappings = {
           n = {
             ['p'] = action_layout.toggle_preview,
+            ['T'] = open_with_trouble,
+            ['t'] = add_to_trouble,
             ['y'] = yank_name,
           },
         },
