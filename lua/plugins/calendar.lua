@@ -35,7 +35,7 @@ return {
       vim.g.calendar_datetime = 'title'
       vim.g.calendar_weeknm = 5
       vim.g.calendar_keys = { goto_next_month = '<A-PageDown>', goto_prev_month = '<A-PageUp>' }
-      vim.g.calendar_no_mappings = 0
+      vim.g.calendar_no_mappings = 1
     end,
     config = function()
       vim.api.nvim_create_autocmd('BufEnter', {
