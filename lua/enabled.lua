@@ -121,6 +121,7 @@ return {
   'linrongbin16/gitlinker.nvim',
   'akinsho/git-conflict.nvim',
   'polarmutex/git-worktree.nvim',
+  "purarue/gitsigns-yadm.nvim",
 
   -- Fun and diagnostics ---------------------------------------------------------
   'epwalsh/pomo.nvim',
