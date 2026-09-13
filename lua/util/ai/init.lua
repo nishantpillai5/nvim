@@ -1,21 +1,10 @@
--- Which AI backend <leader>a talks to, and the registry the backends are
--- declared in. Claude Code and OMP are separate agents in separate terminals
--- that share nothing; this module is what lets one set of keymaps point at
--- whichever is active, and what the tabline indicator reads to say which that
--- is. See the AI section of README.md.
---
--- Required from a lualine component, so it has to stay safe to load before
--- either plugin is on the runtimepath: nothing here touches claudecode.nvim or
--- omp.nvim, and every field is static or resolved from the buffer list.
---
--- Phase 0 of the plan: identity, availability and terminal detection only. The
--- operations (send_raw, show, scrape_*, sessions) and the capability flags that
--- go with them land when the keymaps start dispatching through here.
+-- Which AI backend <leader>a talks to, and the registry they are declared in.
+-- Safe to require from the lualine component: nothing here touches
+-- claudecode.nvim or omp.nvim at load.
 
 local M = {}
 
--- Declaration order is both the cycle order and the default preference: the
--- first available backend is the one a session starts on.
+-- Declaration order is the picker order and the fallback preference.
 local BACKENDS = {
   {
     name = 'claude',
@@ -31,8 +20,7 @@ local BACKENDS = {
   },
 }
 
--- lua/enabled.lua is read once at startup and cannot change afterwards, so this
--- is resolved on first use and kept.
+-- enabled.lua cannot change after startup, so resolve once and keep.
 local enabled_set
 
 local function is_enabled(spec)
@@ -45,9 +33,8 @@ local function is_enabled(spec)
   return enabled_set[spec.plugin] == true
 end
 
--- vim.fn.executable stats every PATH entry. Availability is asked on the first
--- get() and on each cycle, never per redraw -- but PATH doesn't change under a
--- running session either way, so cache it.
+-- vim.fn.executable stats every PATH entry, and PATH does not change under a
+-- running session.
 local executable = {}
 
 local function has_exe(spec)
@@ -59,25 +46,61 @@ local function has_exe(spec)
   return cached
 end
 
--- Enabled in enabled.lua *and* installed. Cycling skips anything unavailable,
--- so switching can never leave the keymaps pointing at a CLI that isn't there.
-function M.available(spec)
-  return is_enabled(spec) and has_exe(spec)
+-- nil when usable, else why not -- shown in the picker and used to refuse it.
+local function unavailable(spec)
+  if not is_enabled(spec) then
+    return 'commented out of enabled.lua'
+  end
+  if not has_exe(spec) then
+    return spec.exe .. ' is not on PATH'
+  end
 end
 
--- nil until the first get(): resolving the default touches PATH, and this
--- module is required during startup.
+function M.available(spec)
+  return unavailable(spec) == nil
+end
+
+-- `omarchy default agent <name>` writes the bare name here. Omarchy hardcodes
+-- $HOME/.config, so this does too rather than using env.XDG_CONFIG_HOME.
+local OMARCHY_AGENT = vim.fs.normalize '~/.config/omarchy/defaults/agent'
+
+function M.omarchy_agent()
+  local f = io.open(OMARCHY_AGENT, 'r')
+  if not f then
+    return nil
+  end
+  local line = f:read 'l'
+  f:close()
+  line = line and vim.trim(line) or ''
+  return line ~= '' and line or nil
+end
+
+-- nil until the first get(): resolving the default touches PATH.
 local current = nil
 
 local function default_backend()
+  -- Omarchy's names match `name` above. One it names that has no backend here
+  -- (`codex`, `grok`) is not a fault -- fall through to declaration order.
+  local preferred = M.omarchy_agent()
+  for _, spec in ipairs(BACKENDS) do
+    if spec.name == preferred then
+      -- Stay on a backend Omarchy named even when broken, rather than hand the
+      -- keys to an agent nobody chose. Scheduled: get() can precede nvim-notify.
+      local why = unavailable(spec)
+      if why then
+        vim.schedule(function()
+          vim.notify(('Omarchy default agent %s is unusable: %s'):format(spec.name, why), vim.log.levels.ERROR)
+        end)
+      end
+      return spec
+    end
+  end
   for _, spec in ipairs(BACKENDS) do
     if M.available(spec) then
       return spec
     end
   end
-  -- Nothing installed. Fall back to the first declared backend rather than
-  -- returning nil, so callers need no extra guard -- the keymaps already report
-  -- a missing terminal when one is asked for.
+  -- Nothing installed: callers need no nil guard, and the ops report it anyway.
   return BACKENDS[1]
 end
 
@@ -92,7 +115,7 @@ function M.set(name)
   for _, spec in ipairs(BACKENDS) do
     if spec.name == name then
       current = spec
-      -- Nothing else dirties the tabline, and lualine only repaints on redraw.
+      -- lualine only repaints on redraw, and nothing else dirties the tabline.
       vim.cmd.redrawtabline()
       vim.api.nvim_exec_autocmds('User', { pattern = 'AiBackendChanged', modeline = false })
       return spec
@@ -101,49 +124,72 @@ function M.set(name)
   vim.notify('No such AI backend: ' .. tostring(name), vim.log.levels.WARN)
 end
 
--- Next available backend, wrapping. Unavailable ones are stepped over, so with
--- one installed this is a no-op that says so rather than appearing to switch.
-function M.cycle()
+-- Unavailable backends are listed too: "omp -- omp is not on PATH" answers what
+-- a silently short menu would not. telescope is required inside, not at load.
+function M.pick()
+  local pickers = require 'telescope.pickers'
+  local finders = require 'telescope.finders'
+  local conf = require('telescope.config').values
+  local actions = require 'telescope.actions'
+  local action_state = require 'telescope.actions.state'
+
   local active = M.get()
-  local start = 1
-  for i, spec in ipairs(BACKENDS) do
-    if spec == active then
-      start = i
-      break
-    end
-  end
-  for step = 1, #BACKENDS - 1 do
-    local spec = BACKENDS[(start + step - 1) % #BACKENDS + 1]
-    if M.available(spec) then
-      -- Silent on success: the tabline indicator is the feedback. The warnings
-      -- here and in `set` stay -- those report a switch that did not happen.
-      M.set(spec.name)
-      return spec
-    end
-  end
-  vim.notify('No other AI backend available', vim.log.levels.WARN)
+
+  pickers
+    .new({}, {
+      prompt_title = 'AI Backend',
+      finder = finders.new_table {
+        results = BACKENDS,
+        entry_maker = function(spec)
+          return {
+            value = spec,
+            display = function(e)
+              local head = e.value.icon .. ' ' .. e.value.name
+              local note = unavailable(e.value)
+              if e.value == active then
+                note = note and ('active, ' .. note) or 'active'
+              end
+              if not note then
+                return head
+              end
+              local full = head .. '  \u{2014}  ' .. note
+              return full, { { { #head, #full }, 'Comment' } }
+            end,
+            ordinal = spec.name,
+          }
+        end,
+      },
+      sorter = conf.generic_sorter {},
+      attach_mappings = function(prompt_bufnr)
+        actions.select_default:replace(function()
+          local sel = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+          if not sel then
+            return
+          end
+          local why = unavailable(sel.value)
+          if why then
+            vim.notify(('%s: %s'):format(sel.value.name, why), vim.log.levels.WARN)
+          elseif sel.value ~= active then
+            -- Silent on success: the tabline indicator is the feedback.
+            M.set(sel.value.name)
+          end
+        end)
+        return true
+      end,
+    })
+    :find()
 end
 
--- Backend operations, registered by the plugin files. Keeping them there rather
--- than here is what stops this module from needing to know how either agent is
--- driven: plugins/claudecode.lua and plugins/omp.lua already own their terminals
--- and their quirks, and each hands over a table of the operations the shared
--- <leader>a keys dispatch to.
---
--- Registration happens at *file body* level, which core/lazy.lua runs for every
--- module under lua/plugins/ while it collects specs -- so the table is here long
--- before its plugin loads, and regardless of whether enabled.lua asked for that
--- plugin at all. An op table existing therefore says nothing about the plugin
--- being loaded; ops load it themselves on first use, via `call` below.
+-- Registered at file-body level by each plugin file, which core/lazy.lua runs
+-- while collecting specs -- so ops exist before the plugin loads, or without it.
 local ops = {}
 
 function M.register(name, table_of_ops)
   ops[name] = table_of_ops
 end
 
--- lazy.nvim keys loading on the plugin's short name, and is a no-op once the
--- plugin is in. Wrapped because a backend whose plugin is commented out of
--- enabled.lua has no spec for lazy to find.
+-- pcall'd: a backend commented out of enabled.lua has no spec for lazy to find.
 local loaded = {}
 
 local function ensure_loaded(spec)
@@ -156,12 +202,8 @@ local function ensure_loaded(spec)
   end)
 end
 
--- Run `op` on the active backend if it has one, and return nil if it doesn't.
--- For capabilities only some backends have: a scraper that reads a terminal, a
--- command list, a mention format. Silence is the *correct* answer there, and
--- deliberately not the same silence as `call`'s warning -- see the note at the
--- top of util/ai/prompt.lua for what inheriting another agent's scraper would
--- have done.
+-- For capabilities only some backends have. Returning nil is load-bearing and
+-- deliberately not `call`'s warning -- see the note atop util/ai/prompt.lua.
 function M.try(op, ...)
   local spec = M.get()
   local fn = ops[spec.name] and ops[spec.name][op]
@@ -172,10 +214,8 @@ function M.try(op, ...)
   return fn(...)
 end
 
--- Run `op` on the active backend. An operation a backend does not implement
--- reports itself rather than doing nothing: silence here reads as a key that
--- didn't register, and with two agents running it would be indistinguishable
--- from having sent the keystroke to the wrong one.
+-- Warns rather than no-ops: with two agents running, silence is
+-- indistinguishable from having sent the keystroke to the wrong one.
 function M.call(op, ...)
   local spec = M.get()
   local fn = ops[spec.name] and ops[spec.name][op]
@@ -192,15 +232,8 @@ function M.status()
   return spec.icon .. ' ' .. spec.name
 end
 
--- The backend a term:// buffer *name* refers to, or nil. Terminal buffers are
--- named "term://{cwd}//{pid}:{command}": the split is anchored on the pid so
--- neither a cwd nor an argument containing a colon can shift it, and argv[0]'s
--- basename is compared for *equality*. A substring test would match `omp` inside
--- docker-compose and `claude` inside a shell started in a .claude/ directory.
---
--- Split out from is_agent_terminal because this is the half with the sharp
--- edges and the only half that can be tested: 'terminal' is not a buftype a
--- buffer can be given, so a real one cannot be synthesised to check it against.
+-- Anchored on the pid in "term://{cwd}//{pid}:{command}", and argv[0]'s basename
+-- compared for equality: a substring test matches `omp` inside docker-compose.
 function M.backend_for_terminal(name)
   local cmd = name:match '//%d+:(.+)$' or name:match ':([^:]*)$'
   local argv0 = cmd and cmd:match '^%S+'
@@ -216,7 +249,6 @@ function M.backend_for_terminal(name)
   return nil
 end
 
--- The backend whose CLI runs in `buf`, or nil.
 function M.is_agent_terminal(buf)
   buf = buf or 0
   if vim.bo[buf].buftype ~= 'terminal' then

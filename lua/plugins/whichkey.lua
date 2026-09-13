@@ -46,7 +46,7 @@ return {
           { '<leader>ow', group = 'Save' },
           { '<leader>r', group = 'Refactor', mode = { 'n', 'v' } },
           { '<leader>t', group = 'Trouble' },
-          { '<leader>V', group = 'Surround' },
+          { '<leader>V', group = 'Surround', mode = { 'n', 'x', 'o' } },
           { '<leader>w', group = 'Workspace' },
           { '<leader>ww', group = 'Worktree' },
           { '<leader>z', group = 'Visual', mode = { 'n', 'v' } },
@@ -55,13 +55,25 @@ return {
           -- nvim-biscuits registers <leader>zC itself, from `toggle_keybind`.
           { '<leader>zC', desc = 'context_virtual' },
           -- mini.surround installs its own mappings once loaded, overwriting
-          -- the descs on lazy's key stubs with its own sentence-case ones.
+          -- the descs on lazy's key stubs with its own sentence-case ones. The
+          -- `l` and `n` suffixes are its suffix_last / suffix_next, which search
+          -- the previous and next surrounding rather than the covering one.
           { '<leader>v', desc = 'surround', mode = { 'n', 'x' } },
           { '<leader>Vd', desc = 'delete' },
-          { '<leader>Vf', desc = 'find' },
-          { '<leader>VF', desc = 'find_left' },
+          { '<leader>Vdl', desc = 'delete_prev' },
+          { '<leader>Vdn', desc = 'delete_next' },
+          { '<leader>Vf', desc = 'find', mode = { 'n', 'x', 'o' } },
+          { '<leader>Vfl', desc = 'find_prev', mode = { 'n', 'x', 'o' } },
+          { '<leader>Vfn', desc = 'find_next', mode = { 'n', 'x', 'o' } },
+          { '<leader>VF', desc = 'find_left', mode = { 'n', 'x', 'o' } },
+          { '<leader>VFl', desc = 'find_left_prev', mode = { 'n', 'x', 'o' } },
+          { '<leader>VFn', desc = 'find_left_next', mode = { 'n', 'x', 'o' } },
           { '<leader>Vh', desc = 'highlight' },
+          { '<leader>Vhl', desc = 'highlight_prev' },
+          { '<leader>Vhn', desc = 'highlight_next' },
           { '<leader>Vr', desc = 'replace' },
+          { '<leader>Vrl', desc = 'replace_prev' },
+          { '<leader>Vrn', desc = 'replace_next' },
           { '<leader>Vn', desc = 'update_n_lines' },
           -- trailblazer sets these itself, with no desc to read.
           { 'm', group = 'Marks' },
@@ -76,6 +88,22 @@ return {
           { 'z', group = 'Fold' },
           { ']', group = 'Next' },
           { '[', group = 'Prev' },
+          -- Bound by their plugins with no desc to read, so which-key shows the
+          -- raw rhs without these.
+          { '<M-i>', desc = 'select_reference', mode = { 'x', 'o' } },
+          -- llama.vim's inst_accept / inst_cancel. :LlamaInstruct is the only
+          -- way to raise an instruction -- llama.lua clears the visual trigger
+          -- -- but these two take normal-mode <Tab> and <Esc> regardless, and
+          -- fall through to the builtins when no instruction is pending.
+          { '<Tab>', desc = 'accept_instruction' },
+          { '<Esc>', desc = 'cancel_instruction' },
+          { 'y<C-G>', desc = 'yank_git_object' },
+          -- matchit, which neovim ships and loads by default.
+          { '%', desc = 'matching_pair', mode = { 'n', 'x', 'o' } },
+          { 'a%', desc = 'matching_pair_object', mode = { 'x' } },
+          { 'g%', desc = 'prev_matching_pair', mode = { 'n', 'x', 'o' } },
+          { '[%', desc = 'unmatched_group_start', mode = { 'n', 'x', 'o' } },
+          { ']%', desc = 'unmatched_group_end', mode = { 'n', 'x', 'o' } },
         },
       }
     end,

@@ -1,7 +1,4 @@
--- Claude Code integration. Most of this is a prompt box you pop over your file:
--- it composes a message, completes @file and slash commands, previews Claude's
--- suggested reply, and can answer an AskUserQuestion prompt by option key --
--- all without focusing the terminal.
+-- Claude Code as one of the AI backends behind <leader>a; see util/ai.
 
 local function relative_time(mtime)
   local diff = os.time() - mtime
@@ -34,10 +31,8 @@ local function extract_text(raw)
   return stripped ~= '' and stripped or nil
 end
 
--- vim.json.decode maps JSON null to vim.NIL, which is *truthy* -- so plain
--- `t.a and t.a.b` throws on `"a":null`. Both readers below run outside any pcall
--- that would catch it, and one bad transcript line would take the whole picker
--- down rather than skipping that line.
+-- vim.json.decode maps null to vim.NIL, which is *truthy*, so `t.a and t.a.b`
+-- throws on `"a":null` -- outside any pcall, that takes the whole picker down.
 local function json_field(tbl, key)
   if type(tbl) ~= 'table' then
     return nil
@@ -72,9 +67,8 @@ local function key_hash(path)
   return out
 end
 
--- Claude keys each project's sessions under ~/.claude/projects by its path:
--- non-alphanumerics become '-', and a key over 200 characters is cut there with
--- a hash suffix. Mirrors the CLI exactly; a key one character off finds nothing.
+-- Non-alphanumerics become '-', and a key over 200 characters is cut with a
+-- hash suffix. Mirrors the CLI exactly; one character off finds nothing.
 local PROJECT_KEY_MAX = 200
 
 local function encode_project(dir)
@@ -120,19 +114,15 @@ local function build_path_map()
   return path_map
 end
 
--- <leader>af re-reads a title per transcript, and transcripts run to tens of
--- MB, so: cache on file identity (mtime+size), parse only the head of the file
--- -- both the ai-title and the first user message live near the top -- and stop
--- as soon as both are in hand. The old version json-decoded every line of every
--- session on every open.
+-- Transcripts run to tens of MB, so cache on mtime+size and parse only the head
+-- -- both the ai-title and the first user message live near the top.
 local TITLE_SCAN_BYTES = 512 * 1024
 local title_cache = {}
 
 local function parse_session_title(chunk)
   local ai_title, first_msg = nil, ''
   for line in chunk:gmatch '[^\n]+' do
-    -- The final line of a truncated chunk is normally incomplete JSON; the
-    -- decode simply fails and it is skipped.
+    -- A truncated chunk's last line is incomplete JSON; the decode just fails.
     local ok, entry = pcall(vim.json.decode, line)
     if ok and type(entry) == 'table' then
       if entry.type == 'ai-title' and json_field(entry, 'aiTitle') then
@@ -194,15 +184,11 @@ local launch_claude
 -- maps and consumed by the cwd_provider in setup below. nil = nvim's own cwd.
 local worktree_cwd
 
--- Forward declaration: assigned lower in the file, but called by show_no_focus
--- above that assignment -- including on the `show` op's path, which is how the
--- shared prompt box starts the terminal with autoscroll too.
+-- Forward declaration: called by show_no_focus above its assignment.
 local ensure_terminal_autoscroll
 
--- Worktrees this repo no longer has, but whose sessions are still on disk:
--- <leader>wwm and <leader>wwd remove the directory, the transcripts under
--- ~/.claude/projects outlive it. Matched by key prefix, newest first -- the
--- encoding is lossy, so the real path cannot be recovered from a key.
+-- Worktrees the repo no longer has whose transcripts outlived the directory.
+-- Matched by key prefix: the encoding is lossy, so no path can be recovered.
 local function orphaned_worktrees(root, live_keys)
   local prefix = encode_project(vim.fs.joinpath(root, '.claude', 'worktrees') .. '/')
   local items = {}
@@ -232,11 +218,9 @@ local function orphaned_worktrees(root, live_keys)
   return items
 end
 
--- Where a session's project sits relative to nvim's cwd. 'here' and 'worktree'
--- share a rank -- both are this repo, and plain recency is the more useful order
--- between them -- but they keep different path colours. Telescope's default
--- strategy draws entry 1 at the bottom of the list, next to the prompt, so rank
--- 1 is what you land on and the greyed-out rest of the world stacks above it.
+-- 'here' and 'worktree' share a rank -- both are this repo, so recency is the
+-- better order between them -- but keep different path colours. Telescope draws
+-- entry 1 at the bottom, next to the prompt, so rank 1 is where you land.
 local ORIGIN_RANK = { here = 1, worktree = 1, other = 2 }
 
 -- Green for this directory, blue for another worktree of the same repo; the
@@ -244,10 +228,8 @@ local ORIGIN_RANK = { here = 1, worktree = 1, other = 2 }
 -- instead and never reaches this table.
 local ORIGIN_PATH_HL = { here = 'Comment', worktree = 'Directory' }
 
--- The ~/.claude/projects keys belonging to a worktree of the repo nvim is in --
--- the live ones git knows about, plus the removed ones whose transcripts
--- outlived the directory. Outside a repo there are none, and the picker just
--- falls back to here-vs-elsewhere.
+-- Keys belonging to a worktree of this repo, live or removed. Outside a repo
+-- there are none and the picker falls back to here-vs-elsewhere.
 local function worktree_keys()
   local records = require('util.git').worktrees(vim.uv.cwd() or '.')
   if not records then
@@ -268,27 +250,20 @@ local function worktree_keys()
   return keys
 end
 
--- ---------------------------------------------------------------------------
--- Session preview pane.
---
--- A transcript is the whole conversation and runs to megabytes, while the
--- previewer re-fires on every cursor move -- so this never reads a file whole.
--- It takes a tail just big enough to fill the preview window, and grows the bite
--- only when a chunk turns out to be mostly tool payloads with little to show.
--- ---------------------------------------------------------------------------
+-- Session preview pane. Transcripts run to megabytes and the previewer re-fires
+-- on every cursor move, so it reads a tail sized to the window and grows the
+-- bite only when a chunk turns out to be mostly tool payloads.
 
 local PREVIEW_TAIL_BYTES = 128 * 1024
 local PREVIEW_MAX_BYTES = 4 * 1024 * 1024
 
--- How much of that tail is kept in the preview buffer. More than one windowful,
--- so <C-u> scrolls back into real history rather than into blank lines, but
--- still bounded -- the buffer is repainted on every cursor move in the list.
+-- More than one windowful so <C-u> scrolls into real history, but bounded --
+-- the buffer is repainted on every cursor move.
 local PREVIEW_MAX_ROWS = 500
 local preview_cache = {}
 
--- The last `bytes` of a file, minus the partial line at the cut. Also reports
--- whether the read reached back to the start, which is the signal to stop
--- growing.
+-- Last `bytes` of a file, minus the partial line at the cut. Also reports
+-- reaching the start, which is the signal to stop growing.
 local function read_tail(path, bytes)
   local stat = vim.uv.fs_stat(path)
   if not stat then
@@ -311,8 +286,7 @@ local function read_tail(path, bytes)
   return chunk, from == 0
 end
 
--- Tool calls are shown as one line, so pick the one argument that says what the
--- call was actually about -- the command, the file, the pattern.
+-- One line per tool call, so pick the argument that says what it was about.
 local TOOL_ARG_KEYS = { 'command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt' }
 
 local function tool_summary(block)
@@ -330,10 +304,8 @@ local function tool_summary(block)
   return name
 end
 
--- One transcript record -> zero or more preview rows, appended to `rows`.
--- Skipped: sidechains (a subagent's own turns, interleaved with the main
--- thread), tool results (bulk, and the call above already says what ran), and
--- thinking blocks.
+-- One record -> zero or more preview rows. Skipped: sidechains, tool results
+-- (bulk, and the call above says what ran), and thinking blocks.
 local function render_record(entry, rows)
   if entry.type ~= 'user' and entry.type ~= 'assistant' then
     return
@@ -351,8 +323,7 @@ local function render_record(entry, rows)
     if type(block) == 'table' then
       if block.type == 'text' and type(block.text) == 'string' then
         if entry.type == 'user' then
-          -- extract_text also collapses a pasted wall of text to one line and
-          -- drops the local-command caveat blocks entirely.
+          -- extract_text also collapses pasted walls and drops caveat blocks.
           local text = extract_text(block.text)
           if text then
             if #rows > 0 then
@@ -414,8 +385,7 @@ local function session_previewer()
   local previewers = require 'telescope.previewers'
   return previewers.new_buffer_previewer {
     title = 'Session',
-    -- One buffer per transcript, reused as you move back and forth over the
-    -- list, instead of a new scratch buffer (and a new markdown parse) per move.
+    -- One buffer per transcript, reused rather than reparsed on every move.
     get_buffer_by_name = function(_, entry)
       return entry.file
     end,
@@ -429,8 +399,7 @@ local function session_previewer()
         lines = { 'Start a new Claude session in', '', '  ' .. entry.project }
       else
         local rows = session_preview_rows(entry.file, height)
-        -- Newest last, and deeper than the window is tall so there is something
-        -- to scroll back into.
+        -- Deeper than the window is tall, so there is something to scroll into.
         for i = math.max(1, #rows - PREVIEW_MAX_ROWS + 1), #rows do
           lines[#lines + 1] = rows[i].text
           kinds[#kinds + 1] = rows[i].kind
@@ -442,9 +411,7 @@ local function session_previewer()
 
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
       vim.api.nvim_buf_clear_namespace(bufnr, preview_ns, 0, -1)
-      -- Markdown for the assistant's own formatting (fences, lists); extmarks on
-      -- top for the turn markers, which outrank treesitter on priority. Guarded
-      -- because setting it re-fires every FileType autocmd on a reused buffer.
+      -- Guarded: setting it re-fires every FileType autocmd on a reused buffer.
       if vim.bo[bufnr].filetype ~= 'markdown' then
         vim.bo[bufnr].filetype = 'markdown'
       end
@@ -458,11 +425,8 @@ local function session_previewer()
       if valid_win then
         -- Wrapped, so nothing is lost off the right edge.
         vim.wo[winid].wrap = true
-        -- Open on the newest line, at the bottom of the window. This has to wait
-        -- a tick: on a first visit telescope hands the freshly built buffer to
-        -- the preview window from a scheduled callback that has not run yet, so
-        -- a cursor set here would scroll the *previous* entry's buffer and the
-        -- swap would then drop us back at line 1. Queued after theirs, it sticks.
+        -- Waits a tick: telescope attaches a fresh buffer from its own scheduled
+        -- callback, so a cursor set now would scroll the previous entry's.
         vim.schedule(function()
           if not (vim.api.nvim_win_is_valid(winid) and vim.api.nvim_win_get_buf(winid) == bufnr) then
             return
@@ -477,11 +441,9 @@ local function session_previewer()
   }
 end
 
--- Session picker. Bare (<leader>af) it lists every project's sessions;
--- `opts.key` narrows that to one project key and `opts.cwd` is where Claude then
--- runs, which for a deleted worktree is the repo it was folded back into.
--- Sessions under another key are dimmed but still resumable: `claude --resume
--- <id>` falls back to scanning ~/.claude/projects for that id.
+-- Bare it lists every project's sessions; `opts.key` narrows to one and
+-- `opts.cwd` is where Claude then runs. Sessions under another key stay
+-- resumable: `claude --resume <id>` scans ~/.claude/projects for the id.
 ---@param opts { key: string?, cwd: string?, title: string?, allow_new: boolean? }?
 local function pick_claude_session(opts)
   local pickers = require 'telescope.pickers'
@@ -518,8 +480,7 @@ local function pick_claude_session(opts)
     end
   end
 
-  -- This repo's sessions -- cwd and worktrees together -- then everyone else's;
-  -- newest first within each group.
+  -- This repo's sessions first, newest first within each group.
   table.sort(entries, function(a, b)
     local ra, rb = ORIGIN_RANK[a.origin], ORIGIN_RANK[b.origin]
     if ra ~= rb then
@@ -528,8 +489,8 @@ local function pick_claude_session(opts)
     return a.mtime > b.mtime
   end)
 
-  -- After the sort, so it stays pinned above the sessions: a worktree nobody has
-  -- opened yet has none, and the picker would otherwise be a dead end.
+  -- After the sort, so it stays pinned: an unopened worktree has no sessions and
+  -- the picker would otherwise be a dead end.
   if opts.allow_new then
     local home = vim.fn.expand '~'
     table.insert(entries, 1, {
@@ -556,8 +517,7 @@ local function pick_claude_session(opts)
             local path_str = '  ' .. e.project
             local time_str = e.new and '' or ('  ' .. relative_time(e.mtime))
             local display = title .. path_str .. time_str
-            -- An unrelated project is dimmed whole; anything from this repo keeps
-            -- a readable title and says which tree it came from in the path.
+            -- Unrelated projects dim whole; this repo's keep a readable title.
             if e.origin == 'other' then
               return display, { { { 0, #display }, 'LspInlayHint' } }
             end
@@ -608,9 +568,8 @@ local function pick_claude_session(opts)
     :find()
 end
 
--- Pick one of this repo's worktrees -- live ones first, then deleted ones that
--- still have sessions -- and hand it to `cb`. Claude runs with its cwd in the
--- worktree (for a deleted one, in the repo) while nvim's cwd stays put.
+-- Live worktrees first, then deleted ones with sessions. Claude runs with its
+-- cwd in the worktree while nvim's stays put.
 local function pick_worktree(cb)
   local cwd = vim.uv.cwd() or '.'
   local records = require('util.git').worktrees(cwd)
@@ -664,9 +623,8 @@ local function pick_worktree(cb)
   end)
 end
 
--- <leader>aw: pick a worktree and pick up its last session. Nothing to continue
--- in one nobody has opened, so start fresh there instead; and `--continue` only
--- looks at the current directory, so a deleted worktree's session needs its id.
+-- Nothing to continue in an unopened worktree, so start fresh; and `--continue`
+-- only looks at the current directory, so a deleted one's session needs its id.
 local function continue_in_worktree()
   pick_worktree(function(item)
     if item.deleted then
@@ -694,9 +652,7 @@ local function pick_worktree_session()
   end)
 end
 
--- Write raw bytes straight to the running Claude terminal's PTY without moving
--- focus, so its prompts can be answered from whatever buffer you're in. Returns
--- false (and notifies) when no live Claude terminal/channel is available.
+-- Raw bytes to the PTY without moving focus; false when no live channel.
 local function send_raw(keys)
   local term = require 'claudecode.terminal'
   local bufnr = term.get_active_terminal_bufnr()
@@ -720,17 +676,9 @@ local function send_raw(keys)
   return true
 end
 
--- ---------------------------------------------------------------------------
--- Claude's half of the shared prompt box (util/ai/prompt.lua).
---
--- The Claude *terminal* autocompletes @file mentions and /slash commands from
--- inside its TUI, which nvim can't observe, so the box reimplements both. The
--- @file half is backend-agnostic and lives with the box; this is the command
--- list it asks for, published below as the `slash_commands` op.
--- ---------------------------------------------------------------------------
-
--- Claude's built-in slash commands (not backed by files). Project/user command
--- and skill files are discovered dynamically alongside these.
+-- The TUI autocompletes @file and /commands internally, which nvim cannot
+-- observe, so the box reimplements both. These are the built-ins; project and
+-- user command files are discovered alongside them.
 local BUILTIN_SLASH = {
   'add-dir',
   'agents',
@@ -761,9 +709,7 @@ local BUILTIN_SLASH = {
   'vim',
 }
 
--- Walked fresh on each call: util/ai/prompt.lua caches the result for the
--- lifetime of one box, which is where the cache belonged all along. A command
--- file added mid-session still shows up the next time you open one.
+-- Walked fresh: the box caches the result for its own lifetime.
 local function slash_command_names()
   local names, seen = {}, {}
   local function add(name)
@@ -775,8 +721,7 @@ local function slash_command_names()
   for _, n in ipairs(BUILTIN_SLASH) do
     add(n)
   end
-  -- Project- and user-level command files. A nested file becomes a namespaced
-  -- command (commands/git/commit.md -> git:commit), matching Claude's convention.
+  -- Nested files namespace, matching Claude: commands/git/commit.md -> git:commit.
   local dirs = { vim.fn.getcwd() .. '/.claude/commands', vim.fn.expand '~/.claude/commands' }
   for _, dir in ipairs(dirs) do
     for _, f in ipairs(vim.fn.glob(dir .. '/**/*.md', false, true)) do
@@ -787,19 +732,11 @@ local function slash_command_names()
   return names
 end
 
--- Scrape Claude's suggested next reply (the greyed text it renders in its input
--- box) out of the terminal buffer. The box is delimited by two horizontal-rule
--- lines; the line between them holds the "❯ " prompt marker + suggestion.
--- Returns nil when there's no terminal, no box, or the input is empty. NOTE:
--- there is no per-cell colour API for terminals, so this can't tell a grey
--- *suggestion* from text you actually typed into the terminal -- it assumes the
--- terminal input is untouched, which holds when you pop the box open to answer.
--- Both scrapers below anchor within a few lines of the terminal's bottom and
--- never look back further than ~70 (the question scraper's `hint - 60` bound),
--- but a terminal carries up to 'scrollback' lines -- 1M, per core/options.lua.
--- Fetch a tail with room to spare rather than copying the whole buffer on every
--- <leader><leader> -- which happened twice per press when no question was found.
--- Every index below is relative to this tail, which is why the bound matters.
+-- The greyed suggestion in Claude's input box, delimited by two horizontal
+-- rules. There is no per-cell colour API for terminals, so this cannot tell a
+-- suggestion from text you typed -- it assumes the input is untouched. Both
+-- scrapers read a tail rather than the buffer, which carries up to 'scrollback'
+-- lines; every index below is relative to that tail.
 local SCRAPE_TAIL_LINES = 200
 
 local function terminal_tail(bufnr)
@@ -821,12 +758,8 @@ local function get_claude_suggestion()
     local stripped, n = s:gsub('\u{2500}', '')
     return n >= 10 and stripped:gsub('%s', '') == ''
   end
-  -- The live input box is always at the very bottom of the terminal, with only
-  -- a few hint lines below it. Find the last non-blank line so stale horizontal
-  -- rules from earlier scrollback can be rejected: without this, two old
-  -- separators get mistaken for the box and their contents returned as a bogus
-  -- "suggestion" -- which then (per the prompt-box gate) wrongly suppresses the
-  -- @-mention prefill.
+  -- Anchored on the last non-blank line, or two stale rules from scrollback get
+  -- mistaken for the box and their contents returned as a bogus suggestion.
   local last_nonblank = 0
   for i = #lines, 1, -1 do
     if lines[i]:gsub('%s', '') ~= '' then
@@ -861,16 +794,13 @@ local function get_claude_suggestion()
   if #content == 0 then
     return nil
   end
-  -- Drop the prompt marker from the first line, right-trim every line's box
-  -- padding, then trim the joined block.
+  -- Drop the prompt marker, right-trim each line's box padding, trim the block.
   content[1] = content[1]:gsub('^%s*', ''):gsub('^\u{276f}%s?', ''):gsub('^>%s?', '')
   for i, l in ipairs(content) do
     content[i] = (l:gsub('%s+$', ''))
   end
-  -- Claude pads its (empty) input box with a non-breaking space (U+00A0),
-  -- which Lua's %s does not match -- normalize it to a plain space first, else
-  -- a blank box scrapes to "\u{00A0}" and is mistaken for a real suggestion
-  -- (which then wrongly suppresses the @-mention prefill).
+  -- The empty box is padded with U+00A0, which Lua's %s does not match -- left
+  -- alone it scrapes to a non-empty string and reads as a real suggestion.
   local text = table.concat(content, '\n'):gsub('\u{00a0}', ' '):gsub('^%s+', ''):gsub('%s+$', '')
   if text == '' then
     return nil
@@ -878,10 +808,8 @@ local function get_claude_suggestion()
   return text
 end
 
--- Build the Claude @-mention text for a visual line range in the given buffer,
--- e.g. "@lua/config/claude.lua#L10-20" (or "#L10" for a single line). The path
--- is relative to cwd and the line numbers are 1-indexed, matching Claude's own
--- mention format. Returns nil for non-file or unnamed buffers.
+-- Claude's mention format: "@lua/config/claude.lua#L10-20", cwd-relative and
+-- 1-indexed. nil for non-file or unnamed buffers.
 local function build_mention(buf, vsel)
   if vim.bo[buf].buftype ~= '' then
     return nil
@@ -897,32 +825,18 @@ local function build_mention(buf, vsel)
   return '@' .. rel .. '#L' .. vsel[1] .. '-' .. vsel[2]
 end
 
--- ---------------------------------------------------------------------------
--- Answering Claude's AskUserQuestion prompts from a selection menu.
+-- AskUserQuestion prompts are scraped live from the terminal: Claude only
+-- flushes one to disk *after* it is answered. The tab currently shown renders as
 --
--- When Claude asks structured questions (its tabbed multiple-choice UI) the
--- centered text box isn't useful. We can't read the pending question from the
--- session transcript -- Claude only flushes an AskUserQuestion to disk *after*
--- it's answered -- so instead we scrape it live from the terminal buffer, the
--- same trick get_claude_suggestion() uses for the input box. The prompt renders
--- as:
---
---   ←  ☐ Fruit  ☐ Colors  ✔ Submit  →      <- tab bar (one tab per question + Submit)
---   Which fruit do you prefer?           <- the current question
---   ❯ 1. Apple                           <- ❯ marks the highlighted option
---        A crisp red or green fruit.     <- option description (indented)
+--   ←  ☐ Fruit  ☐ Colors  ✔ Submit  →   <- tab bar, one per question + Submit
+--   Which fruit do you prefer?          <- the question
+--   ❯ 1. Apple                          <- ❯ marks the highlighted option
+--        A crisp red or green fruit.    <- description, indented
 --     2. Banana
---   ...
 --   Enter to select · Tab/Arrow keys to navigate · Esc to cancel
 --
--- Multi-select questions render a "[ ]" / "[x]" checkbox per option. The options
--- are numbered, and pressing an option's number selects it (single-select) or
--- toggles its checkbox (multi-select) -- the only input that proved reliable
--- over the PTY (synthetic arrow keys did nothing). So <leader><leader> scrapes
--- whatever tab is currently shown into a Telescope menu and, on pick, presses
--- the chosen option's number key(s). <leader>a; sends Tab to move to the next
--- tab (the menu then re-scrapes it), and <leader>j (Enter) submits from Submit.
--- ---------------------------------------------------------------------------
+-- Multi-select adds a "[ ]"/"[x]" per option. Answers go back as option number
+-- keys, the only input that proved reliable over the PTY.
 
 -- A horizontal-rule line (───...), used to bound the box on screen.
 local function is_hr(s)
@@ -933,10 +847,8 @@ end
 -- Parse one option line. Returns { num, label, checked } or nil. `checked` is
 -- nil for single-select, true/false for a "[x]"/"[ ]" checkbox.
 local function parse_option_line(line)
-  -- Column the number starts at, with the ❯ highlight marker measured as the
-  -- whitespace it replaces so the highlighted row lines up with the others.
-  -- The scrape loop uses this to reject numbered lines that sit deeper than the
-  -- options -- i.e. a numbered list inside an option's description.
+  -- Column the number starts at, counting ❯ as the whitespace it replaces. The
+  -- scrape loop rejects numbered lines deeper than this -- i.e. inside a desc.
   local prefix = line:match '^%s*\u{276f}%s*' or line:match '^%s*' or ''
   local indent = vim.fn.strdisplaywidth(prefix)
 
@@ -945,11 +857,8 @@ local function parse_option_line(line)
   if not num then
     return nil
   end
-  -- Only a genuine checkbox counts. `1. [P0] Fix it` is a label that happens to
-  -- start with a bracket: treating it as checked flipped the whole question to
-  -- multi-select, and choice_keys (util/ai/prompt.lua) then pressed the *other*
-  -- options' numbers
-  -- (their state differed) while skipping the one actually picked.
+  -- Only a genuine checkbox: `1. [P0] Fix it` flipped the question to
+  -- multi-select, and choice_keys then pressed every *other* option's number.
   local inside, label = rest:match '^%[([^%]]*)%]%s*(.*)$'
   if inside ~= nil then
     local mark = inside:gsub('%s', '')
@@ -960,9 +869,8 @@ local function parse_option_line(line)
   return { num = tonumber(num), label = rest, indent = indent }
 end
 
--- Scrape the AskUserQuestion prompt out of the live terminal. Returns
--- { multiselect, question, options = { {num, pos, label, desc, checked} } }
--- for the currently-shown tab, or nil when no such prompt is on screen.
+-- Returns { multiselect, question, options = { {num, pos, label, desc, checked} } }
+-- for the shown tab, or nil when no such prompt is on screen.
 local function scrape_claude_question()
   local ok, term = pcall(require, 'claudecode.terminal')
   if not ok then
@@ -980,16 +888,10 @@ local function scrape_claude_question()
       break
     end
   end
-  -- The signature footer, unique to the selection prompt. Anchor on the
-  -- bottom-most one -- earlier renders leave stale copies higher in scrollback.
-  -- Require it right at the bottom so a stale prompt (no live question) is
-  -- rejected rather than answered blind.
-  -- Claude renders this footer as one line carrying every part:
-  -- `Enter to select · ↑/↓ to navigate · Esc to cancel`. Requiring two of those
-  -- phrases together, rather than either alone, is what keeps ordinary output
-  -- from matching -- a turn ending in a todo list (rendered with the same ☐/☑
-  -- glyphs the box header uses) plus any prose mentioning navigation used to be
-  -- enough to pop a bogus answer menu.
+  -- Anchored on the bottom-most footer, and required right at the bottom, so a
+  -- stale prompt is rejected rather than answered blind. Two of its phrases must
+  -- match together: a turn ending in a todo list uses the same ☐/☑ glyphs, and
+  -- either phrase alone was enough to pop a bogus answer menu.
   local hint
   for i = #lines, 1, -1 do
     if lines[i]:find('to navigate', 1, true) and lines[i]:find('to select', 1, true) then
@@ -1000,11 +902,9 @@ local function scrape_claude_question()
   if not hint or (last_nonblank - hint) > 8 then
     return nil
   end
-  -- The header/tab line is the box's top boundary. It carries a checkbox glyph
-  -- per question (☐/☑/✔) -- present both for single-question prompts ("☐ Foo")
-  -- and multi-question tab bars ("← ☐ A  ☐ B  ✔ Submit →"). Take the nearest one
-  -- above the hint; refuse (fall back to the prompt box) when there's none rather
-  -- than scanning up into scrollback and swallowing stray numbered lines.
+  -- The tab line bounds the box on top, carrying a ☐/☑/✔ per question. Take the
+  -- nearest above the hint and refuse when there is none, rather than scanning
+  -- into scrollback and swallowing stray numbered lines.
   local top
   for i = hint - 1, math.max(1, hint - 60), -1 do
     if
@@ -1074,9 +974,8 @@ local function claude_win()
   return nil
 end
 
--- Detect the Claude Code terminal by the command in its term:// buffer name
--- ("term://{cwd}//{pid}:{command}") -- test the command part only so a plain
--- shell opened inside a .claude/ dir isn't matched.
+-- Tests only the command part of "term://{cwd}//{pid}:{command}", so a shell
+-- opened inside a .claude/ dir is not matched.
 local function is_claude_terminal(buf)
   if vim.bo[buf].buftype ~= 'terminal' then
     return false
@@ -1086,8 +985,7 @@ local function is_claude_terminal(buf)
   return cmd:find('claude', 1, true) ~= nil
 end
 
--- Any Claude terminal at all, shown or hidden. Only consulted when no window is
--- displaying one, so the buffer sweep is not part of the common tick.
+-- Only consulted when no window shows one, so the sweep is off the common tick.
 local function any_claude_terminal()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if is_claude_terminal(buf) then
@@ -1098,11 +996,8 @@ local function any_claude_terminal()
 end
 
 show_no_focus = function(cmd_args)
-  -- claudecode.nvim drops cmd_args whenever a Claude terminal buffer already
-  -- exists: terminal.lua's ensure_terminal_visible_no_focus returns early when
-  -- one is visible, and the Snacks provider's open() reuses a hidden one without
-  -- looking at the command at all. So --resume/--continue would silently just
-  -- re-show the running session. Say so instead of appearing to work.
+  -- claudecode.nvim drops cmd_args when a Claude buffer already exists, so
+  -- --resume/--continue would silently re-show the running session.
   if cmd_args and any_claude_terminal() then
     vim.notify(
       'A Claude session is already running -- close it with <leader>ax to start a different one.',
@@ -1121,9 +1016,8 @@ show_no_focus = function(cmd_args)
   end)
 end
 
--- Start Claude, optionally with its process cwd in `dir`. claudecode.nvim
--- manages a single terminal and reuses it wherever it already runs, so another
--- tree can only be opened once the first is gone.
+-- claudecode.nvim manages a single terminal and reuses it wherever it runs, so
+-- another tree can only be opened once the first is gone.
 launch_claude = function(cmd_args, dir)
   if dir then
     if any_claude_terminal() then
@@ -1147,11 +1041,8 @@ local function toggle_no_focus(cmd_args)
 end
 
 -- Neovim only auto-follows terminal output in the *focused* window, and terminal
--- buffers don't fire nvim_buf_attach on_lines for PTY output -- so while you edit
--- elsewhere the Claude terminal streams past the bottom of its viewport. Poll on
--- a timer and keep any UNFOCUSED window showing a Claude terminal pinned to its
--- last line. The focused window is left alone (Neovim follows it natively, and
--- you may be scrolling its history there).
+-- buffers fire no on_lines for PTY output -- so poll, and pin every unfocused
+-- window to its last line. The focused one is left alone.
 local autoscroll_timer = nil
 
 local function stop_terminal_autoscroll()
@@ -1166,7 +1057,7 @@ ensure_terminal_autoscroll = function()
   if autoscroll_timer then
     return
   end
-  -- Only ever nil if the process is out of file descriptors.
+  -- Only nil when out of file descriptors.
   autoscroll_timer = assert(vim.uv.new_timer())
   autoscroll_timer:start(
     250,
@@ -1179,8 +1070,7 @@ ensure_terminal_autoscroll = function()
           local buf = vim.api.nvim_win_get_buf(win)
           if is_claude_terminal(buf) then
             found = true
-            -- The focused window still counts as "found", but Neovim already
-            -- follows output there and you may be reading its history.
+            -- Counts as found, but Neovim already follows output there.
             if win ~= cur then
               local last = vim.api.nvim_buf_line_count(buf)
               pcall(vim.api.nvim_win_set_cursor, win, { last, 0 })
@@ -1188,9 +1078,8 @@ ensure_terminal_autoscroll = function()
           end
         end
       end
-      -- Claude is gone (<leader>ax, or the CLI exited): stop instead of waking
-      -- four times a second for the rest of the session. Anything that shows a
-      -- terminal again calls ensure_terminal_autoscroll().
+      -- Stop rather than wake four times a second for the rest of the session;
+      -- anything that shows a terminal calls ensure_terminal_autoscroll().
       if not found and not any_claude_terminal() then
         stop_terminal_autoscroll()
       end
@@ -1198,12 +1087,8 @@ ensure_terminal_autoscroll = function()
   )
 end
 
--- Claude terminal behavior: enable jk-to-escape
--- and tmux-style split navigation from terminal-insert (buffer-local), and keep
--- unfocused windows scrolled to the newest output.
--- True when the only non-floating windows left (across all tabpages) show the
--- Claude terminal -- i.e. every editing window is gone and Claude is all that
--- remains. Floating windows (prompt box, popups) are ignored.
+-- True when every remaining non-floating window shows the Claude terminal.
+-- Floats (prompt box, popups) are ignored.
 local function only_claude_windows_left()
   local claude, other = 0, 0
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -1221,9 +1106,8 @@ end
 local function has_unsaved_changes()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     local buftype = vim.bo[buf].buftype
-    -- 'acwrite' counts as much as a real file buffer: oil.nvim stages pending
-    -- renames and deletes in one and marks it modified, and the `qall!` this
-    -- guards would discard them without a prompt.
+    -- 'acwrite' counts too: oil.nvim stages pending renames in one, and the
+    -- `qall!` this guards would discard them without a prompt.
     local writable = buftype == '' or buftype == 'acwrite'
     if vim.api.nvim_buf_is_loaded(buf) and writable and vim.bo[buf].modified then
       return true
@@ -1232,15 +1116,8 @@ local function has_unsaved_changes()
   return false
 end
 
--- The operations the shared <leader>a keys dispatch to. Those keys are declared
--- once, in core/keymaps.lua, and resolve the active backend at press time; this
--- is Claude's half of that contract. Everything here is Claude-specific and
--- stays so -- util/ai/init.lua deliberately knows none of it. See the AI
--- section of README.md.
---
--- This runs at file-body level, which core/lazy.lua executes for every module
--- under lua/plugins/ while collecting specs, so the table is registered well
--- before claudecode.nvim itself loads.
+-- Claude's half of the shared <leader>a contract, registered at file-body level
+-- -- which core/lazy.lua runs while collecting specs, so this lands before load.
 require('util.ai').register('claude', {
   send_raw = send_raw,
   term_buf = function()
@@ -1249,10 +1126,8 @@ require('util.ai').register('claude', {
   show = function()
     show_no_focus()
   end,
-  -- How a composed prompt reaches the TUI. Bracketed paste keeps a multi-line
-  -- message one message; the CR that submits it has to land after Claude has
-  -- finished reading the paste, hence the defer. Returns false when the channel
-  -- is gone, which is what stops the box tearing itself down over a failed send.
+  -- Bracketed paste keeps a multi-line message one message, and the submitting
+  -- CR has to land after Claude finishes reading it -- hence the defer.
   submit = function(text)
     local normalized = text:gsub('\r\n', '\n'):gsub('\r', '\n')
     if not send_raw('\27[200~' .. normalized .. '\27[201~') then
@@ -1263,16 +1138,13 @@ require('util.ai').register('claude', {
     end, 100)
     return true
   end,
-  -- The two scrapers and the mention format are Claude's alone: they read
-  -- Claude's TUI and write Claude's @path#L10-20 syntax. util/ai/prompt.lua
-  -- reaches them with `try`, so a backend without them gets nothing rather than
-  -- these. See the AI section of README.md.
+  -- Claude's alone: they read Claude's TUI and write its @path#L10-20 syntax.
+  -- The box reaches them with `try`, so another backend gets nothing.
   scrape_suggestion = get_claude_suggestion,
   scrape_question = scrape_claude_question,
   mention = build_mention,
   slash_commands = slash_command_names,
-  -- Attaching context by hand. OMP implements none of these: its bridge is
-  -- already pushing the cursor's file and line, so there is nothing to attach.
+  -- OMP implements none of these: its bridge already pushes the cursor's file.
   attach_visual = function()
     vim.cmd 'ClaudeCodeSend'
   end,
@@ -1282,8 +1154,7 @@ require('util.ai').register('claude', {
   attach_buffer = function()
     vim.cmd 'ClaudeCodeAdd %'
   end,
-  -- The nvim-side picker over ~/.claude/projects; find_session_cli is Claude's
-  -- own in-TUI one. OMP has only the latter, and points both at it.
+  -- nvim-side picker over ~/.claude/projects; find_session_cli is the in-TUI one.
   find_session = function()
     pick_claude_session()
   end,
@@ -1292,8 +1163,7 @@ require('util.ai').register('claude', {
   end,
   worktree_continue = continue_in_worktree,
   worktree_session = pick_worktree_session,
-  -- claudecode.nvim's MCP diff protocol. omp.nvim is a context bridge with no
-  -- equivalent, so these stay Claude-only.
+  -- claudecode.nvim's MCP diff protocol, which omp.nvim has no equivalent for.
   diff_accept = function()
     vim.cmd 'ClaudeCodeDiffAccept'
   end,
@@ -1325,13 +1195,11 @@ require('util.ai').register('claude', {
   interrupt = function()
     send_raw '`'
   end,
-  -- Next question tab in an AskUserQuestion prompt; the next <leader><leader>
-  -- re-scrapes whichever tab is then shown.
+  -- Next question tab; the next <leader><leader> re-scrapes whichever is shown.
   next_tab = function()
     send_raw '\t'
   end,
-  -- Shift+Tab is the terminal back-tab sequence: ESC [ Z. Cycles permission
-  -- mode in Claude, reasoning effort in OMP.
+  -- Shift+Tab is the back-tab sequence ESC [ Z; cycles permission mode.
   cycle_mode = function()
     send_raw '\27[Z'
   end,
@@ -1353,21 +1221,16 @@ return {
       'ClaudeCodeDiffDeny',
       'ClaudeCodeSelectModel',
     },
-    -- No `keys` at all: every <leader>a mapping is declared once in
-    -- core/keymaps.lua and dispatched through util.ai, so a key can never fire
-    -- at Claude while the tabline says another backend is active. The `cmd`
-    -- list above is what lazy loads this on, alongside util.ai's own
-    -- `lazy.load` when an op is first called.
+    -- No `keys`: every mapping is declared in core/keymaps.lua and dispatched
+    -- through util.ai, so the `cmd` list above is what lazy loads this on.
     config = function()
       require('claudecode').setup {
-        -- Every field of ClaudeCodeTerminalConfig is annotated as required; the
-        -- plugin merges what you pass over its own defaults.
+        -- Every field is annotated required, but the plugin merges over defaults.
         ---@diagnostic disable-next-line: missing-fields
         terminal = {
           split_width_percentage = 0.45,
-          -- Where the Claude process starts: the worktree maps park a path in
-          -- worktree_cwd, read once so later launches are nvim's cwd again. Must
-          -- be here -- build_config drops per-call overrides that default to nil.
+          -- worktree_cwd is read once, so later launches are nvim's cwd again.
+          -- Must be here: build_config drops per-call overrides defaulting to nil.
           cwd_provider = function()
             local dir = worktree_cwd
             worktree_cwd = nil
@@ -1385,9 +1248,8 @@ return {
           local term_buf = args.buf
           -- Wait briefly just in case we immediately switch out of the buffer
           vim.defer_fn(function()
-            -- args.buf rather than 0: the prompt box (util/ai/prompt.lua) starts
-            -- the terminal and its float takes focus back well inside these 100ms,
-            -- so resolving buffer 0 here would inspect the float and skip the maps.
+            -- args.buf, not 0: the prompt box's float takes focus back inside
+            -- these 100ms, so buffer 0 would resolve to it and skip the maps.
             if not vim.api.nvim_buf_is_valid(term_buf) or not is_claude_terminal(term_buf) then
               return
             end
@@ -1399,8 +1261,7 @@ return {
               [[<C-\><C-n>]],
               { buffer = term_buf, silent = true, desc = 'escape terminal mode' }
             )
-            -- tmux-style split navigation from terminal-insert, scoped to this
-            -- buffer so shells keep <C-h/j/k/l> for their own line editing.
+            -- Buffer-scoped, so shells keep <C-h/j/k/l> for line editing.
             for key, dir in pairs { h = 'Left', j = 'Down', k = 'Up', l = 'Right' } do
               vim.keymap.set(
                 't',
@@ -1413,10 +1274,8 @@ return {
         end,
       })
 
-      -- When the last editing window is closed and only the Claude terminal remains,
-      -- quit Neovim. Deferred to a clean tick (out of the WinClosed cascade) and
-      -- guarded so it fires once; bail if any file buffer is modified so unsaved work
-      -- is never lost.
+      -- Deferred out of the WinClosed cascade and guarded to fire once; bails if
+      -- any file buffer is modified.
       local quitting = false
       vim.api.nvim_create_autocmd('WinClosed', {
         group = group,

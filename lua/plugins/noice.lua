@@ -11,8 +11,17 @@ return {
         end,
         desc = 'noice_disable',
       },
-      -- Was `Telescope notify`; noice keeps its own history.
-      { '<leader>fz', '<cmd>Noice history<cr>', desc = 'notifications' },
+      -- noice ships its own telescope extension, so load it here rather than
+      -- in telescope's config, which can run before noice exists.
+      {
+        '<leader>fz',
+        function()
+          local telescope = require 'telescope'
+          telescope.load_extension 'noice'
+          telescope.extensions.noice.noice()
+        end,
+        desc = 'notifications',
+      },
     },
     opts = {
       lsp = {

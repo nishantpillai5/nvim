@@ -21,20 +21,14 @@ map('n', '<leader>zw', ':set wrap!<cr>', { desc = 'wrap' })
 map('n', '<leader>zq', ':set lazyredraw!<cr>', { desc = 'lazyredraw_toggle' })
 map('n', '<leader>z/', ':nohlsearch<cr>', { desc = 'clear_search' })
 
--- <leader>a drives whichever AI backend is active: <leader>ab cycles it
--- (skipping any whose CLI isn't installed) and the tabline indicator says which
--- one is live. The operations themselves are registered by
--- plugins/claudecode.lua and plugins/omp.lua -- this only names the keys, so a
--- backend that can't do one of them says so instead of failing silently. The
--- keys live here rather than in either plugin's `keys` list because two specs
--- cannot both claim <leader>aa; util.ai loads the right plugin on first use.
--- See util/ai/init.lua and the AI section of README.md.
+-- <leader>a dispatches to the active AI backend through util.ai. The keys live
+-- here rather than in either plugin's `keys` list because two specs cannot both
+-- claim <leader>aa; util.ai loads the right plugin on first use.
 map({ 'n', 'v' }, '<leader>ab', function()
-  require('util.ai').cycle()
-end, { desc = 'backend_cycle' })
+  require('util.ai').pick()
+end, { desc = 'backend_pick' })
 
--- The prompt box, and the answer menu when the backend can see a question on
--- screen. Lives in util/ai/prompt.lua, which is backend-agnostic.
+-- The prompt box, and the answer menu when the backend can see a question.
 map({ 'n', 'v' }, '<leader><leader>', function()
   require('util.ai.prompt').open()
 end, { desc = 'prompt' })
@@ -64,11 +58,8 @@ for _, entry in ipairs {
   end, { desc = desc })
 end
 
--- <leader>av attaches what you are looking at, and what that means depends on
--- where you are: a visual selection anywhere, or the entry under the cursor in a
--- file tree. Two separate maps rather than one op that inspects the mode, so the
--- key simply does not exist in normal mode in an ordinary buffer -- which is how
--- it behaved when claudecode.nvim's own `keys` spec scoped it with `ft`.
+-- Two maps rather than one op inspecting the mode, so <leader>av simply does not
+-- exist in normal mode in an ordinary buffer.
 map('v', '<leader>av', function()
   require('util.ai').call 'attach_visual'
 end, { desc = 'attach_visual' })
@@ -97,9 +88,8 @@ map({ 'n', 'v' }, '<leader>y', [["+y]], { desc = 'yank_to_clipboard' })
 map('n', '<leader>Y', [["+Y]], { desc = 'yank_line_to_clipboard' })
 map({ 'n', 'v' }, '<leader>d', [["+d]], { desc = 'delete_to_clipboard' })
 map({ 'n', 'v' }, '<leader>D', [["_d]], { desc = 'delete_to_void' })
--- Visual only: `"_d` voids the selection instead of letting it clobber the
--- unnamed register, so `"+P` still pastes the clipboard. There is no useful
--- normal-mode form -- `"+d` there just waits for a motion `P` cannot supply.
+-- Visual only: `"_d` voids the selection so `"+P` still pastes the clipboard. In
+-- normal mode `"+d` would just wait for a motion `P` cannot supply.
 map('x', '<leader>P', [["_d"+P]], { desc = 'delete_then_paste_from_clipboard' })
 map({ 'n', 'x' }, '<leader>p', [["+p]], { desc = 'paste_from_clipboard' })
 
@@ -144,8 +134,7 @@ end
 map('n', '<leader>ew', cd_to_current_file, { desc = 'cd_to_current_file' })
 map('n', '<leader>we', cd_to_current_file, { desc = 'cd_to_current_file' })
 
--- Reveal the current file in the OS file manager. vim.ui.open picks the right
--- opener per platform, so there is no OS branching to maintain here.
+-- vim.ui.open picks the opener per platform, so there is no OS branching here.
 map('n', '<leader>eO', function()
   local path = vim.fn.expand '%:p:h'
   vim.notify('Opening: ' .. path)
@@ -168,8 +157,7 @@ for lhs, spec in pairs {
   end, { desc = desc })
 end
 
--- Copy a terminal buffer's scrollback into a scratch `log` buffer, so the output
--- survives the terminal and can be searched and yanked from normally.
+-- Scrollback into a scratch `log` buffer, so it survives the terminal.
 map('n', '<leader>oy', function()
   local bufnr = vim.api.nvim_get_current_buf()
   if vim.bo[bufnr].buftype ~= 'terminal' then
@@ -204,7 +192,6 @@ map('n', '<leader>oy', function()
   vim.bo[target].filetype = 'log'
 end, { desc = 'yank_to_log' })
 
--- Buffer-local mapping, registered when a file under `pattern` is opened.
 -- Grouped and cleared: <leader>iI re-runs this file, and an ungrouped autocmd
 -- would stack another copy of every map_local on each reload.
 local map_local_group = vim.api.nvim_create_augroup('map_local', { clear = true })
@@ -231,11 +218,9 @@ map_local('<leader>ii', config_dir .. '/**', function()
   vim.notify('Sourced config: ' .. file)
 end, 'source_config_current_file')
 
--- init.lua is only the leader vars plus `require 'core'`, so sourcing MYVIMRC
--- reloads nothing -- the require is already cached. Drop the base modules from
--- the cache and re-require them instead. core.lazy and core.lsp are skipped on
--- purpose: re-running lazy.setup and vim.lsp.enable in a live session is not
--- reload-safe.
+-- Sourcing MYVIMRC reloads nothing, since `require 'core'` is already cached --
+-- so drop the base modules and re-require. core.lazy and core.lsp are skipped:
+-- re-running lazy.setup and vim.lsp.enable in a live session is not safe.
 local BASE_MODULES = {
   'core.options',
   'core.filetypes',
@@ -261,8 +246,7 @@ map_local('<leader>iI', config_dir .. '/**', function()
   vim.notify('Reloaded base config: ' .. table.concat(BASE_MODULES, ', '))
 end, 'reload_base_config')
 
--- Reload external tools from their own config files. vim.system is async and
--- takes an argv list, so nothing goes through a shell.
+-- Reload external tools. vim.system takes an argv list, so no shell is involved.
 local function reloader(cmd, label)
   return function()
     vim.system(cmd, { text = true }, function(res)
