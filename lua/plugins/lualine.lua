@@ -181,6 +181,13 @@ local function task_status()
   return last_run_text() .. last_build_text()
 end
 
+-- Macro recording. lualine has no component for it, and the "recording @q"
+-- message is a mode message that noice swallows.
+local function macro_recording()
+  local reg = vim.fn.reg_recording()
+  return reg ~= '' and ('󰑊 ' .. reg) or ''
+end
+
 return {
   {
     'nvim-lualine/lualine.nvim',
@@ -194,6 +201,26 @@ return {
         section_separators = { left = '', right = '' },
         component_separators = { left = '', right = '' },
         ignore_focus = IGNORE_FTS,
+        -- The defaults are repeated because this table is deep-extended onto
+        -- them by index, so a shorter list would leave their tail in place.
+        -- RecordingEnter/Leave are the additions; the refresh they queue runs a
+        -- tick later, by which point RecordingLeave's reg_recording() is clear.
+        refresh = {
+          events = {
+            'WinEnter',
+            'BufEnter',
+            'BufWritePost',
+            'SessionLoadPost',
+            'FileChangedShellPost',
+            'VimResized',
+            'Filetype',
+            'CursorMoved',
+            'CursorMovedI',
+            'ModeChanged',
+            'RecordingEnter',
+            'RecordingLeave',
+          },
+        },
         disabled_filetypes = {
           statusline = {},
           winbar = { 'toggleterm' },
@@ -293,6 +320,7 @@ return {
               return ok and noice.api.status.command.has()
             end,
           },
+          macro_recording,
         },
         lualine_z = {
           {

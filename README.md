@@ -42,10 +42,6 @@ socket.
   `vim-be-good`. Their keymaps are whatever `nvo` still binds.
 - **There is no snippet engine at all.** LuaSnip went with lsp-zero and nothing
   replaced it.
-- **There is no recording indicator.** noice's default routes `skip`
-  `msg_showmode`, which is where Neovim's own `recording @q` lives. Getting it
-  back is a lualine component beside the noice command one in
-  `plugins/lualine.lua` -- `require('noice').api.status.mode` -- not a plugin.
 - **`mmdc` is missing**, so mermaid diagrams do not render under `<leader>zp`.
   Everything else snacks.image draws is fine.
 - **`tectonic` is not in the container image,** so LaTeX equations do not render
@@ -57,18 +53,3 @@ socket.
   yaml, shell, vim, sql, plain text, project config -- where `:'<,'>!column -t`
   is the answer. If it ever comes in, it goes in the mini.surround shape:
   `version = '*'`, `ga` / `gA` in `{ n, x }`, descriptions in `whichkey.lua`.
-- **No outline in a filetype with neither a treesitter parser nor a language
-  server.** That was vista's ctags backend; aerial has no equivalent.
-
-## Open decisions
-
-- **Should a `<leader>ab` switch survive a restart?** The backend a session
-  starts on now comes from Omarchy's `omarchy default agent`, falling back to
-  declaration order off Omarchy. A mid-session pick is still in-memory only.
-- **Treesitter-driven extract for pyright and lua_ls.** `<leader>la` code actions
-  already cover extract-to-function and extract-variable wherever the server
-  implements them (rust-analyzer, vtsls, gopls, clangd, jdtls). Reconsider
-  refactoring.nvim if Python or Lua refactoring starts hurting.
-- **`:Make`.** No `makeprg` is ever set, here or in the old config, and nothing
-  in overseer v2 reads one. If it is ever wanted it is a `new_task` with
-  `expandcmd(vim.o.makeprg)` and `on_output_quickfix`, in `plugins/overseer.lua`.
