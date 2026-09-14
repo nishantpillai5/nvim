@@ -18,12 +18,23 @@ local BACKENDS = {
     plugin = 'rauls-kjarners/omp.nvim',
     icon = '󰚩',
   },
+  {
+    name = 'pi',
+    exe = 'pi',
+    -- No plugin: the panel is the whole backend, so enabled.lua has no name to
+    -- gate it with and the executable on PATH is its only switch.
+    plugin = nil,
+    icon = '󰚩',
+  },
 }
 
 -- enabled.lua cannot change after startup, so resolve once and keep.
 local enabled_set
 
 local function is_enabled(spec)
+  if spec.plugin == nil then
+    return true
+  end
   if not enabled_set then
     enabled_set = {}
     for _, name in ipairs(require 'enabled') do
@@ -193,7 +204,7 @@ end
 local loaded = {}
 
 local function ensure_loaded(spec)
-  if loaded[spec.name] then
+  if loaded[spec.name] or spec.plugin == nil then
     return
   end
   loaded[spec.name] = true

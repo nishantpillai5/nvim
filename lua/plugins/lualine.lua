@@ -255,6 +255,7 @@ return {
           },
         },
         lualine_x = {
+          -- require 'minuet.lualine',
           lint_progress,
           { 'diagnostics', always_visible = false },
           lsp_clients,

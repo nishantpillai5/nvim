@@ -106,7 +106,8 @@ return {
   'Avi-D-coder/whisper.nvim',
 
   -- AI ------------------------------------------------------------------------
-  'ggml-org/llama.vim',
+  -- 'ggml-org/llama.vim', -- replaced by minuet-ai.nvim (needs llama.cpp, which we don't run)
+  'milanglacier/minuet-ai.nvim',
   'coder/claudecode.nvim',
   -- 'olimorris/codecompanion.nvim',
   'rauls-kjarners/omp.nvim',
