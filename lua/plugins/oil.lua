@@ -1,3 +1,30 @@
+-- Favourite directories, for the two <leader>f keys below. `_G.fav_dirs` is the
+-- per-project half: plugins/config_local.lua loads a repo's .nvim.lua before
+-- this runs, and whatever it sets there wins over the names below.
+local function select_fav(callback)
+  local env = require 'util.env'
+  local dirs = vim.tbl_extend('force', {
+    config = env.XDG_CONFIG_HOME,
+    notes = env.DIR_NOTES,
+    nvim = env.DIR_NVIM,
+  }, _G.fav_dirs or {})
+
+  local names = vim.tbl_keys(dirs)
+  table.sort(names)
+
+  vim.ui.select(names, {
+    prompt = 'Favourite directories',
+    format_item = function(name)
+      return ('%s  (%s)'):format(name, vim.fn.fnamemodify(dirs[name], ':~'))
+    end,
+  }, function(name)
+    if name then
+      -- A hand-written .nvim.lua entry may still be '~/...'.
+      callback(vim.fn.expand(dirs[name]))
+    end
+  end)
+end
+
 return {
   {
     'stevearc/oil.nvim',
@@ -5,6 +32,22 @@ return {
     cmd = 'Oil',
     keys = {
       { '<leader>ef', '<cmd>Oil<cr>', desc = 'oil' },
+      {
+        '<leader>fe',
+        function()
+          select_fav(function(dir)
+            require('oil').open(dir)
+          end)
+        end,
+        desc = 'fav_dirs',
+      },
+      {
+        '<leader>fE',
+        function()
+          select_fav(vim.ui.open)
+        end,
+        desc = 'fav_dirs_external',
+      },
     },
     -- oil's win_options.winbar takes a vimscript expression, so the function it
     -- calls has to be reachable from v:lua -- hence the global.

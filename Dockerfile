@@ -12,11 +12,13 @@ FROM archlinux:base
 # branch builds every parser in util/parsers.lua from source. git-delta is what
 # telescope's diff previewer uses when it is on PATH, and npm/pip/go/cargo are
 # what :MasonInstallAll builds its packages with. imagemagick and ghostscript are
-# snacks.image's: it shells out to `magick`, which reads PDFs through gs.
+# snacks.image's: it shells out to `magick`, which reads PDFs through gs, and to
+# `mmdc` for mermaid, which drives chromium.
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
       base-devel \
       cargo \
+      chromium \
       curl \
       fd \
       fzf \
@@ -54,6 +56,20 @@ RUN nvim --version | head -n 1 && \
 # keeps ~/.claude in a volume so `claude login` survives, and passes
 # ANTHROPIC_API_KEY through from the host.
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+
+# snacks.image shells out to `mmdc` for mermaid blocks. Its puppeteer peer dep
+# would pull down a second browser on install; the chromium above is already
+# here, with the shared libs a bare puppeteer download would be missing.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
+RUN npm install -g @mermaid-js/mermaid-cli && npm cache clean --force
+
+# Two things mmdc gets wrong here: chromium's sandbox needs privileges this
+# container has not got, and mmdc asks puppeteer for `headless: "shell"`, which
+# means the separate chrome-headless-shell binary rather than chromium itself.
+# plugins/snacks.lua passes this file to mmdc wherever it exists.
+RUN printf '%s\n' \
+      '{ "executablePath": "/usr/bin/chromium", "headless": true, "args": ["--no-sandbox"] }' \
+      > /etc/mermaid-puppeteer.json
 
 # On Linux a bind mount keeps the host's uid, which has to exist in here for the
 # repo to be writable. Defaults suit a single-user Linux box; macOS ignores
