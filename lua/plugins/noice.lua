@@ -45,6 +45,19 @@ return {
         },
       },
       popupmenu = { enabled = false },
+      commands = {
+        history = {
+          filter = {
+            any = {
+              { event = 'notify' },
+              { error = true },
+              { warning = true },
+              { event = 'msg_show', kind = { '', 'echo', 'echomsg', 'lua_print', 'list_cmd' } },
+              { event = 'lsp', kind = 'message' },
+            },
+          },
+        },
+      },
       routes = {
         -- "written" after every save is noise.
         {

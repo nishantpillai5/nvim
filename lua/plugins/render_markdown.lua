@@ -18,6 +18,9 @@ return {
       enabled = false,
       -- snacks draws the equations; this would put latex2text text over them.
       latex = { enabled = false },
+      -- Both fight snacks' images: the background paints over them, and the
+      -- default border 'hide' drops the row their overflow anchors to.
+      code = { style = 'language', border = 'none' },
     },
   },
 }
