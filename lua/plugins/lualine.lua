@@ -188,11 +188,98 @@ local function macro_recording()
   return reg ~= '' and ('󰑊 ' .. reg) or ''
 end
 
+-- minuet's request progress, off its own User events. Its bundled component is
+-- unused: requiring it in `opts` would load minuet at startup, not on InsertEnter.
+local minuet = { busy = false, total = 1, finished = 0, spinner = 1, round = nil, model = nil }
+
+local function minuet_track()
+  local group = vim.api.nvim_create_augroup('lualine_minuet', { clear = true })
+  vim.api.nvim_create_autocmd('User', {
+    pattern = 'MinuetRequestStartedPre',
+    group = group,
+    callback = function(ev)
+      local data = ev.data or {}
+      minuet.total = data.n_requests or 1
+      minuet.finished = 0
+      minuet.busy = false
+      minuet.round = data.timestamp
+    end,
+  })
+  vim.api.nvim_create_autocmd('User', {
+    pattern = 'MinuetRequestStarted',
+    group = group,
+    callback = function()
+      minuet.busy = true
+    end,
+  })
+  vim.api.nvim_create_autocmd('User', {
+    pattern = 'MinuetRequestFinished',
+    group = group,
+    callback = function(ev)
+      -- terminate_all_jobs() runs before the next round announces itself, so a
+      -- superseded job's Finished can land after the counters reset. Drop those:
+      -- the stamp is os.time(), so same-second rounds can still slip through.
+      if minuet.round and (ev.data or {}).timestamp ~= minuet.round then
+        return
+      end
+      minuet.finished = minuet.finished + 1
+      if minuet.finished >= minuet.total then
+        minuet.busy = false
+      end
+    end,
+  })
+end
+
+-- Ask the server what it actually loaded. Retried only while unknown, so a down
+-- server cannot spin curl on every redraw; a later swap needs an nvim restart.
+local function minuet_fetch_model(provider)
+  if minuet.model or not provider or not provider.end_point then
+    return
+  end
+  local now = vim.uv.now()
+  if minuet.asked_at and now - minuet.asked_at < 10000 then
+    return
+  end
+  minuet.asked_at = now
+  local base = provider.end_point:gsub('/v1/.*$', '')
+  vim.system({ 'curl', '-sf', '--max-time', '2', base .. '/v1/models' }, { text = true }, function(res)
+    local ok, decoded = pcall(vim.json.decode, res.stdout or '')
+    local id = ok and vim.tbl_get(decoded or {}, 'data', 1, 'id')
+    if type(id) == 'string' and id ~= '' then
+      minuet.model = id
+    end
+  end)
+end
+
+-- Gated on minuet being loaded, so a disabled plugin shows nothing.
+local function minuet_model()
+  if not package.loaded['minuet'] then
+    return ''
+  end
+  local config = require('minuet').config
+  local provider = config and config.provider_options[config.provider]
+  minuet_fetch_model(provider)
+  local model = minuet.model or (provider and provider.model)
+  if not model or model == '' then
+    return ''
+  end
+  -- Served names are often a full repo id; the basename is what fits a statusline.
+  model = model:match '[^/\\]+$' or model
+  if not minuet.busy then
+    return ' 󰚩 ' .. ARRAY[1] .. model .. ARRAY[2]
+  end
+  local frame
+  frame, minuet.spinner = require('util.tasks').spinner(minuet.spinner, 'run')
+  local progress = minuet.total > 1 and (' %d/%d'):format(minuet.finished + 1, minuet.total) or ''
+  return ' ' .. frame .. ' ' .. ARRAY[1] .. model .. progress .. ARRAY[2]
+end
+
 return {
   {
     'nvim-lualine/lualine.nvim',
     event = 'VeryLazy',
     dependencies = { 'nvim-tree/nvim-web-devicons' },
+    init = minuet_track,
     opts = {
       extensions = { 'overseer', 'nvim-dap-ui' },
       options = {
@@ -255,7 +342,7 @@ return {
           },
         },
         lualine_x = {
-          -- require 'minuet.lualine',
+          minuet_model,
           lint_progress,
           { 'diagnostics', always_visible = false },
           lsp_clients,

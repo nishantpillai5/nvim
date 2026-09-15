@@ -241,6 +241,27 @@ local function open_prompt_input()
       pcall(vim.fn['llama#enable'])
     end
   end
+
+  -- minuet only enables itself from a FileType autocmd, which a scratch buffer
+  -- never fires, so drive its flag by hand: on while composing, off while empty.
+  local has_minuet, minuet_vt = pcall(require, 'minuet.virtualtext')
+  local function set_minuet(on)
+    if not has_minuet then
+      return
+    end
+    vim.b[buf].minuet_virtual_text_auto_trigger = on
+    if not on then
+      pcall(minuet_vt.action.dismiss)
+    end
+  end
+  local function minuet_visible()
+    if not has_minuet then
+      return false
+    end
+    local ok, visible = pcall(minuet_vt.action.is_visible)
+    return ok and visible
+  end
+
   local win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor',
     width = width,
@@ -255,10 +276,9 @@ local function open_prompt_input()
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
 
-  -- Before our keymaps: llama#disable() unmaps <buffer> <Tab>.
-  if suggestion then
-    suppress_llama()
-  end
+  -- Before our keymaps: llama#disable() unmaps <buffer> <Tab>/<S-Tab> outright,
+  -- taking ours with it. Off for the box's lifetime; restored on wipeout.
+  suppress_llama()
 
   local function fit_height()
     if not vim.api.nvim_win_is_valid(win) then
@@ -307,9 +327,7 @@ local function open_prompt_input()
     callback = function()
       fit_height()
       render_ghost()
-      if not buffer_is_empty() then
-        restore_llama()
-      end
+      set_minuet(not buffer_is_empty())
     end,
   })
   vim.api.nvim_create_autocmd('BufWipeout', {
@@ -402,13 +420,16 @@ local function open_prompt_input()
     end, { buffer = buf })
   end
 
-  -- <Tab>: accept the completion if the menu is open, else accept Claude's
-  -- previewed suggestion if there is one, else insert a literal tab.
+  -- <Tab>: accept the completion if the menu is open, else minuet's ghost, else
+  -- Claude's previewed suggestion if there is one, else insert a literal tab.
+  -- Buffer-local, so it wins over minuet's own global <Tab> accept map.
   vim.keymap.set('i', '<Tab>', function()
     if vim.fn.pumvisible() == 1 then
       -- 'noselect' means <C-y> with nothing highlighted just dismisses, leaving
       -- a fuzzy token like "@clcode" behind -- take the top entry instead.
       feed(vim.fn.complete_info({ 'selected' }).selected == -1 and '<C-n><C-y>' or '<C-y>')
+    elseif minuet_visible() then
+      pcall(minuet_vt.action.accept)
     elseif accept_suggestion() then
       return
     else

@@ -1,10 +1,12 @@
--- AI ghost-text completion against the local Magnitude model (OpenAI-compatible
--- endpoint of the magnitude-service, no separate process).
+-- AI ghost-text completion against llama-server (~/.models/coder.sh, port 8012).
+-- The FIM provider posts prefix+suffix, so no chat scaffolding applies.
 return {
   {
     'milanglacier/minuet-ai.nvim',
     event = { 'InsertEnter', 'BufReadPost' },
-    config = true,
+    config = function(_, opts)
+      require('minuet').setup(opts)
+    end,
     -- Dim grey ghost text, kept stable across colorscheme changes.
     init = function()
       local function set_hl()
@@ -17,12 +19,13 @@ return {
       })
     end,
     opts = {
-      provider = 'openai_compatible',
+      provider = 'openai_fim_compatible',
       frontend = 'virtualtext',
-      request_timeout = 15, -- 27B model over local inference; be patient
-      -- Latency tuning (model does ~800 prompt-tok/s, so context size is the
-      -- main cost): default 16000 chars (~4k tokens) = ~5s before first token.
-      context_window = 4000, -- ~1k tokens of surrounding code; TTFT stays <0.5s
+      request_timeout = 15, -- curl --max-time, so it has to cover a cold model load
+      -- The main latency lever: ~1 ms of prefill per prompt token, measured.
+      context_window = 1500,
+      -- Parallel requests per keystroke for FIM, not alternatives in one prompt.
+      n_completions = 1,
       throttle = 750,
       debounce = 250,
       virtualtext = {
@@ -37,17 +40,26 @@ return {
         },
       },
       provider_options = {
-        openai_compatible = {
+        openai_fim_compatible = {
           -- Env-var name (minuet looks it up); TERM always exists, no auth needed.
           api_key = 'TERM',
-          end_point = 'http://127.0.0.1:10100/inference/v1/chat/completions',
-          model = 'qwen3.8-27b:gguf:q4',
-          name = 'Magnitude',
+          end_point = 'http://127.0.0.1:8012/v1/completions',
+          -- Empty so the statusline shows nothing until the server names the model
+          -- (lualine.lua). llama-server ignores it; vLLM needs its served name.
+          model = '',
+          name = 'llama.cpp',
           optional = {
-            max_tokens = 64, -- ghost text is short; cap generation time
-            -- Skip the reasoning phase; otherwise every completion waits on
-            -- a wall of reasoning_content before the first real token.
-            reasoning_effort = 'none',
+            max_tokens = 64, -- hard ceiling; `stop` should end it well before this
+            -- Without these an instruct model writes whole functions past the
+            -- cursor, emitting the FIM markers as text instead of ending the turn.
+            stop = {
+              '\n\n',
+              '<|fim_prefix|>',
+              '<|fim_suffix|>',
+              '<|fim_middle|>',
+              '<|file_sep|>',
+              '<|endoftext|>',
+            },
           },
         },
       },
