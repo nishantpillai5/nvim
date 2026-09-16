@@ -1,7 +1,6 @@
 return {
   {
     'alexghergh/nvim-tmux-navigation',
-    event = { 'BufReadPre', 'BufNewFile' },
     keys = {
       { '<C-h>', '<cmd>NvimTmuxNavigateLeft<cr>', mode = { 'n', 'v' }, desc = 'navigate_left' },
       { '<C-j>', '<cmd>NvimTmuxNavigateDown<cr>', mode = { 'n', 'v' }, desc = 'navigate_down' },

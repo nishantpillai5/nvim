@@ -14,13 +14,28 @@ local function step(fn, label)
   end
 end
 
--- Telescope's dap pickers. load_extension is idempotent and telescope may not
--- be loaded when dap's config runs, so it happens on first use instead.
+-- Telescope's dap pickers. telescope-dap is loaded by hand because lazy's module
+-- hook reads `telescope._extensions.dap` as telescope.nvim's, not its own.
 local function picker(name)
   return function()
+    require('lazy').load { plugins = { 'telescope-dap.nvim' } }
     require('telescope').load_extension 'dap'
     require('telescope').extensions.dap[name]()
   end
+end
+
+-- overseer decodes launch.json (dap's own decoder rejects the comments VSCode
+-- allows) and runs preLaunchTask. Wired on first launch, not in `config`, which
+-- runs on every file open -- persistent-breakpoints loads dap at BufReadPre.
+local overseer_wired = false
+local function wire_overseer()
+  if overseer_wired then
+    return
+  end
+  overseer_wired = true
+  require('dap.ext.vscode').json_decode = require('overseer.json').decode
+  -- overseer's own opts set `dap = false`, so it is patched on here instead.
+  require('overseer').enable_dap(true)
 end
 
 local function toggle_virtual_text()
@@ -30,11 +45,10 @@ end
 return {
   {
     'mfussenegger/nvim-dap',
+    -- Only what `config` calls. telescope-dap and overseer are loaded on demand.
     dependencies = {
       'ofirgall/goto-breakpoints.nvim',
       'theHamsta/nvim-dap-virtual-text',
-      'nvim-telescope/telescope-dap.nvim',
-      'stevearc/overseer.nvim',
     },
     keys = {
       {
@@ -47,6 +61,7 @@ return {
       {
         '<F5>',
         function()
+          wire_overseer()
           require('dap').continue()
         end,
         desc = 'debug_continue/start',
@@ -82,16 +97,6 @@ return {
     config = function()
       local dap = require 'dap'
 
-      -- dap.continue() offers the project's .vscode/launch.json configurations by
-      -- itself (its "dap.launch.json" config provider), so nothing has to load
-      -- them here -- but it decodes them with vim.json.decode, which rejects the
-      -- comments and trailing commas VSCode allows. overseer's decoder does not.
-      require('dap.ext.vscode').json_decode = require('overseer.json').decode
-
-      -- overseer's own opts set `dap = false`, so it is patched here instead --
-      -- that routes preLaunchTask/postDebugTask through overseer.
-      require('overseer').enable_dap(true)
-
       require('nvim-dap-virtual-text').setup {
         only_first_definition = false,
         all_references = true,
@@ -112,4 +117,7 @@ return {
       }
     end,
   },
+  -- Standalone, not a dependency: dap loads on every file open and would bring
+  -- telescope with it. picker() above loads this instead.
+  { 'nvim-telescope/telescope-dap.nvim', lazy = true },
 }

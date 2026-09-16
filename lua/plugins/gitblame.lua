@@ -1,7 +1,6 @@
 return {
   {
     'nishantpillai5/git-blame.nvim',
-    event = 'BufReadPost',
     keys = {
       { '<leader>goc', '<cmd>GitBlameOpenCommitURL<cr>', mode = { 'n', 'v' }, desc = 'commit' },
       { '<leader>gof', '<cmd>GitBlameOpenFileURL<cr>', mode = { 'n', 'v' }, desc = 'file' },

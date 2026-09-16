@@ -5,13 +5,13 @@ return {
     keys = {
       { '<leader>gB', '<cmd>Gitsigns blame<cr>', desc = 'blame_buffer' },
     },
-    dependecies = {
-      "purarue/gitsigns-yadm.nvim"
+    dependencies = {
+      'purarue/gitsigns-yadm.nvim',
     },
     opts = {
       current_line_blame_opts = { delay = 100 },
       _on_attach_pre = function(bufnr, callback)
-        require("gitsigns-yadm").yadm_signs(callback, { bufnr = bufnr })
+        require('gitsigns-yadm').yadm_signs(callback, { bufnr = bufnr })
       end,
       on_attach = function(bufnr)
         local gs = require 'gitsigns'

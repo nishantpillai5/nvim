@@ -79,6 +79,7 @@ return {
   -- Debugging and testing -----------------------------------------------------
   'mfussenegger/nvim-dap',
   'rcarriga/nvim-dap-ui',
+  'nvim-telescope/telescope-dap.nvim',
   'Weissle/persistent-breakpoints.nvim',
   -- 'mfussenegger/nvim-dap-python',
   'nvim-neotest/neotest',
@@ -110,7 +111,7 @@ return {
   'milanglacier/minuet-ai.nvim',
   'coder/claudecode.nvim',
   -- 'olimorris/codecompanion.nvim',
-  'rauls-kjarners/omp.nvim',
+  -- 'rauls-kjarners/omp.nvim',
 
   -- Git -----------------------------------------------------------------------
   'tpope/vim-fugitive',
@@ -122,7 +123,7 @@ return {
   'linrongbin16/gitlinker.nvim',
   'akinsho/git-conflict.nvim',
   'polarmutex/git-worktree.nvim',
-  "purarue/gitsigns-yadm.nvim",
+  'purarue/gitsigns-yadm.nvim',
 
   -- Fun and diagnostics ---------------------------------------------------------
   'epwalsh/pomo.nvim',

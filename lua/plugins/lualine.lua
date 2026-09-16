@@ -109,13 +109,17 @@ local function lsp_clients()
   return '  ' .. ARRAY[1] .. table.concat(out, ' ') .. ' ' .. ARRAY[2]
 end
 
+-- `pcall(require, x)` would load x through lazy's module hook; this does not.
+local function loaded(mod)
+  return package.loaded[mod] ~= nil
+end
+
 -- Linters currently running. Was lint.lua's lualine injection.
 local function lint_progress()
-  local ok, lint = pcall(require, 'lint')
-  if not ok then
+  if not loaded 'lint' then
     return ''
   end
-  local running = lint.get_running()
+  local running = require('lint').get_running()
   if #running == 0 then
     return '   '
   end
@@ -135,10 +139,10 @@ local spinner_build, spinner_run = 1, 1
 -- Most recent build task, with a spinner while it runs. Was overseer.lua's own
 -- lualine.setup call.
 local function last_build_text()
-  local ok, overseer = pcall(require, 'overseer')
-  if not ok then
+  if not loaded 'overseer' then
     return ''
   end
+  local overseer = require 'overseer'
   local tasks = require 'util.tasks'
   -- overseer v2 replaced `recent_first` with a sort callback.
   local list = overseer.list_tasks {
@@ -159,10 +163,10 @@ end
 
 -- Only shown while a run task is actually running.
 local function last_run_text()
-  local ok, overseer = pcall(require, 'overseer')
-  if not ok then
+  if not loaded 'overseer' then
     return ''
   end
+  local overseer = require 'overseer'
   local tasks = require 'util.tasks'
   local list = overseer.list_tasks {
     sort = require('overseer.task_list').sort_newest_first,
@@ -179,6 +183,26 @@ end
 
 local function task_status()
   return last_run_text() .. last_build_text()
+end
+
+local OVERSEER_ICONS = { FAILURE = '󰅚 ', CANCELED = ' ', SUCCESS = '󰄴 ', RUNNING = '󰑮 ' }
+
+-- Replaces the `{ 'overseer' }` component: that one lives in overseer.nvim and
+-- requires it at file scope, which loaded overseer -- and telescope -- on setup.
+local function overseer_counts()
+  if not loaded 'overseer' then
+    return ''
+  end
+  local counts, pieces = {}, {}
+  for _, task in ipairs(require('overseer.task_list').list_tasks { include_ephemeral = true }) do
+    counts[task.status] = (counts[task.status] or 0) + 1
+  end
+  for _, status in ipairs(require('overseer.constants').STATUS.values) do
+    if OVERSEER_ICONS[status] and counts[status] then
+      table.insert(pieces, ('%%#Overseer%s#%s%d'):format(status, OVERSEER_ICONS[status], counts[status]))
+    end
+  end
+  return table.concat(pieces, ' ')
 end
 
 -- Macro recording. lualine has no component for it, and the "recording @q"
@@ -253,7 +277,7 @@ end
 
 -- Gated on minuet being loaded, so a disabled plugin shows nothing.
 local function minuet_model()
-  if not package.loaded['minuet'] then
+  if not loaded 'minuet' then
     return ''
   end
   local config = require('minuet').config
@@ -336,8 +360,7 @@ return {
               return '' .. require('gitblame').get_current_blame_text()
             end,
             cond = function()
-              local ok, gitblame = pcall(require, 'gitblame')
-              return ok and gitblame.is_blame_text_available()
+              return loaded 'gitblame' and require('gitblame').is_blame_text_available()
             end,
           },
         },
@@ -389,12 +412,11 @@ return {
               return '󰄉 ' .. tostring(require('pomo').get_first_to_finish())
             end,
             cond = function()
-              local ok, pomo = pcall(require, 'pomo')
-              return ok and pomo.get_first_to_finish() ~= nil
+              return loaded 'pomo' and require('pomo').get_first_to_finish() ~= nil
             end,
           },
           task_status,
-          { 'overseer' },
+          overseer_counts,
           {
             -- NoiceStatus declares its ---@class on a `return` statement, so
             -- lua_ls registers the class name but none of its fields.
@@ -403,9 +425,8 @@ return {
               return require('noice').api.status.command.get()
             end,
             cond = function()
-              local ok, noice = pcall(require, 'noice')
               ---@diagnostic disable-next-line: undefined-field
-              return ok and noice.api.status.command.has()
+              return loaded 'noice' and require('noice').api.status.command.has()
             end,
           },
           macro_recording,
@@ -416,7 +437,7 @@ return {
               return require('util.scope').status()
             end,
             cond = function()
-              return package.loaded['neoscopes'] ~= nil
+              return loaded 'neoscopes'
             end,
           },
           -- Whisper: the pulse, then the buffer transcribed words are landing

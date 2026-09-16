@@ -1,5 +1,6 @@
 return {
   {
-    "purarue/gitsigns-yadm.nvim",
+    'purarue/gitsigns-yadm.nvim',
+    lazy = true,
   },
 }

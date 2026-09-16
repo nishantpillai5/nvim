@@ -45,7 +45,7 @@ return {
     'rauls-kjarners/omp.nvim',
     -- Eager: the bridge must track the cursor before a session starts.
     event = 'VeryLazy',
-    dependencies = { 'akinsho/nvim-toggleterm.lua' },
+    -- No toggleterm dependency: util/ai/panel loads it on first use.
     -- The plugin's other half is an OMP extension in ~/.omp, kept in step here.
     build = 'omp plugin install omp.nvim',
     -- No `keys`: every mapping is declared in core/keymaps.lua and dispatched

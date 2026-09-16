@@ -3,7 +3,7 @@
 return {
   {
     'milanglacier/minuet-ai.nvim',
-    event = { 'InsertEnter', 'BufReadPost' },
+    event = 'InsertEnter',
     config = function(_, opts)
       require('minuet').setup(opts)
     end,

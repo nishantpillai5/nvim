@@ -1,7 +1,7 @@
 return {
   {
     'aymericbeaumet/vim-symlink',
-    event = 'VeryLazy',
+    event = 'BufReadPre',
     dependencies = { 'moll/vim-bbye' },
   },
 }
