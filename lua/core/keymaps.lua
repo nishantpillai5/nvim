@@ -1,7 +1,6 @@
 local env = require 'util.env'
 
--- Descriptions go inline on each mapping. which-key and `:map` both read them
--- straight off the keymap, so there is no separate table to keep in sync.
+-- which-key and `:map` read the desc off the keymap, so nothing needs syncing.
 local function map(mode, lhs, rhs, opts)
   opts = vim.tbl_extend('force', { noremap = true, silent = true }, opts or {})
   vim.keymap.set(mode, lhs, rhs, opts)
@@ -21,9 +20,8 @@ map('n', '<leader>zw', ':set wrap!<cr>', { desc = 'wrap' })
 map('n', '<leader>zq', ':set lazyredraw!<cr>', { desc = 'lazyredraw_toggle' })
 map('n', '<leader>z/', ':nohlsearch<cr>', { desc = 'clear_search' })
 
--- <leader>a dispatches to the active AI backend through util.ai. The keys live
--- here rather than in either plugin's `keys` list because two specs cannot both
--- claim <leader>aa; util.ai loads the right plugin on first use.
+-- Here rather than in either backend's `keys` list, because two specs cannot
+-- both claim <leader>aa; util.ai loads the right plugin on first use.
 map({ 'n', 'v' }, '<leader>ab', function()
   require('util.ai').pick()
 end, { desc = 'backend_pick' })
@@ -58,8 +56,8 @@ for _, entry in ipairs {
   end, { desc = desc })
 end
 
--- Two maps rather than one op inspecting the mode, so <leader>av simply does not
--- exist in normal mode in an ordinary buffer.
+-- Two maps rather than one op inspecting the mode, so <leader>av does not exist
+-- in normal mode in an ordinary buffer.
 map('v', '<leader>av', function()
   require('util.ai').call 'attach_visual'
 end, { desc = 'attach_visual' })
@@ -88,8 +86,7 @@ map({ 'n', 'v' }, '<leader>y', [["+y]], { desc = 'yank_to_clipboard' })
 map('n', '<leader>Y', [["+Y]], { desc = 'yank_line_to_clipboard' })
 map({ 'n', 'v' }, '<leader>d', [["+d]], { desc = 'delete_to_clipboard' })
 map({ 'n', 'v' }, '<leader>D', [["_d]], { desc = 'delete_to_void' })
--- Visual only: `"_d` voids the selection so `"+P` still pastes the clipboard. In
--- normal mode `"+d` would just wait for a motion `P` cannot supply.
+-- Visual only: in normal mode `"+d` would wait for a motion `P` cannot supply.
 map('x', '<leader>P', [["_d"+P]], { desc = 'delete_then_paste_from_clipboard' })
 map({ 'n', 'x' }, '<leader>p', [["+p]], { desc = 'paste_from_clipboard' })
 
@@ -134,7 +131,7 @@ end
 map('n', '<leader>ew', cd_to_current_file, { desc = 'cd_to_current_file' })
 map('n', '<leader>we', cd_to_current_file, { desc = 'cd_to_current_file' })
 
--- vim.ui.open picks the opener per platform, so there is no OS branching here.
+-- vim.ui.open picks the opener per platform, so nothing branches on the OS.
 map('n', '<leader>eO', function()
   local path = vim.fn.expand '%:p:h'
   vim.notify('Opening: ' .. path)
@@ -192,8 +189,7 @@ map('n', '<leader>oy', function()
   vim.bo[target].filetype = 'log'
 end, { desc = 'yank_to_log' })
 
--- Grouped and cleared: <leader>iI re-runs this file, and an ungrouped autocmd
--- would stack another copy of every map_local on each reload.
+-- Cleared: <leader>iI re-runs this file, stacking a copy of every map_local.
 local map_local_group = vim.api.nvim_create_augroup('map_local', { clear = true })
 
 local function map_local(lhs, pattern, rhs, desc)
@@ -218,9 +214,8 @@ map_local('<leader>ii', config_dir .. '/**', function()
   vim.notify('Sourced config: ' .. file)
 end, 'source_config_current_file')
 
--- Sourcing MYVIMRC reloads nothing, since `require 'core'` is already cached --
--- so drop the base modules and re-require. core.lazy and core.lsp are skipped:
--- re-running lazy.setup and vim.lsp.enable in a live session is not safe.
+-- Dropped and re-required, since sourcing MYVIMRC hits the `require 'core'`
+-- cache. core.lazy and core.lsp are unsafe to re-run in a live session.
 local BASE_MODULES = {
   'core.options',
   'core.filetypes',
@@ -246,7 +241,7 @@ map_local('<leader>iI', config_dir .. '/**', function()
   vim.notify('Reloaded base config: ' .. table.concat(BASE_MODULES, ', '))
 end, 'reload_base_config')
 
--- Reload external tools. vim.system takes an argv list, so no shell is involved.
+-- vim.system takes an argv list, so no shell is involved.
 local function reloader(cmd, label)
   return function()
     vim.system(cmd, { text = true }, function(res)

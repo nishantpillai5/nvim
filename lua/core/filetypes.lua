@@ -1,5 +1,4 @@
--- Filetype overrides. These replace the `FileType`/`BufRead` autocmds the old
--- config used for the same job -- `vim.filetype.add` runs at detection time, so
+-- `vim.filetype.add` runs at detection time, so unlike a FileType autocmd
 -- nothing has to re-fire after the buffer is already set up.
 vim.filetype.add {
   extension = {
@@ -10,13 +9,9 @@ vim.filetype.add {
     std = 'javascript',
   },
   pattern = {
-    -- Log files, in place of vim-log-highlighting: the runtime already carries
-    -- that plugin's syntax file (`$VIMRUNTIME/syntax/log.vim`, MTDL9 credited as
-    -- former maintainer), but its `log` extension entry resolves only four
-    -- vendor names -- upstream, upstreaminstall, usserver, usw2kagt -- and
-    -- leaves a plain `app.log` with no filetype at all. The negative priority is
-    -- what keeps those four: patterns below zero are consulted only after the
-    -- extension table has already failed.
+    -- The runtime's own `log` extension entry resolves only four vendor names
+    -- and leaves a plain `app.log` untyped. The negative priority keeps those
+    -- four: patterns below zero are consulted only after the extension table.
     ['.*%.[lL][oO][gG]'] = { 'log', { priority = -10 } },
     ['.*_[lL][oO][gG]'] = { 'log', { priority = -10 } },
   },

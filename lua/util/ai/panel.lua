@@ -1,8 +1,5 @@
--- The shared toggleterm panel for single-terminal TUI backends (OMP, pi).
--- Each backend file calls M.panel{...} once at file-body level and registers
--- the returned ops (plus its own senders) with util.ai. The panel owns the
--- whole terminal lifecycle: one hidden vertical split per backend, spawned on
--- demand, reachable without moving focus.
+-- The shared toggleterm panel for single-terminal TUI backends (OMP, pi): one
+-- hidden vertical split each, spawned on demand, reachable without focus.
 
 local M = {}
 
@@ -10,28 +7,24 @@ local ESC_TIMEOUT = 200 -- ms in which a second <Esc> means "leave terminal mode
 
 ---@param opts { id: number, name: string, exe: string, width: number }
 function M.panel(opts)
-  -- The one terminal for this backend, or nil when none has been started this
-  -- session.
   local term = nil
 
   local function size()
     return math.floor(vim.o.columns * opts.width)
   end
 
-  -- Reused across presses, and there is only ever one panel per backend.
   local esc_timer = nil
 
   -- core/keymaps.lua binds <Esc> in terminal mode, which would swallow it
-  -- before the TUI's dialogs see it. In this buffer only, the first <Esc> goes
-  -- through and a second within ESC_TIMEOUT leaves terminal mode.
+  -- before the TUI's dialogs see it.
   local function double_esc()
-    -- Only nil when out of file descriptors, where there is no useful fallback.
+    -- Only nil when out of file descriptors.
     esc_timer = esc_timer or assert(vim.uv.new_timer())
     if esc_timer:is_active() then
       esc_timer:stop()
       return [[<C-\><C-n>]]
     end
-    -- An empty callback: the handle's own active/idle state is the whole signal.
+    -- Empty callback: the handle's own active/idle state is the whole signal.
     esc_timer:start(ESC_TIMEOUT, 0, function() end)
     return '<Esc>'
   end
@@ -43,14 +36,11 @@ function M.panel(opts)
       silent = true,
       desc = ('escape to %s, twice to leave terminal mode'):format(opts.name),
     })
-    -- The insert-mode escape this config uses everywhere, for leaving in one go.
     vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { buffer = bufnr, silent = true, desc = 'escape terminal mode' })
   end
 
-  -- Required lazily: core/lazy.lua requires every file under lua/plugins/ to
-  -- collect specs, long before toggleterm is on the runtimepath. The numbered
-  -- terminals' keys and the bridge plugins are its usual loaders, and a config
-  -- where neither is enabled reaches here first -- so load it explicitly.
+  -- Loaded explicitly: core/lazy.lua requires this file while collecting specs,
+  -- long before toggleterm's usual loaders have had a chance to run.
   local function new(cmd)
     -- lazy matches specs by short name, as util.ai's ensure_loaded does.
     pcall(function()
@@ -64,25 +54,21 @@ function M.panel(opts)
       display_name = opts.name,
       close_on_exit = false, -- leave the panel up when the TUI exits, so its last output is readable
       auto_scroll = true, -- the panel is usually unfocused, where Neovim won't follow output itself
-      -- Once per buffer, and again if the job is respawned into a new one.
       on_create = function(self)
         set_terminal_keys(self.bufnr)
       end,
     }
   end
 
-  -- The terminal if its buffer is still around, else nil. Returns the handle
-  -- rather than a boolean so callers can write to a session they know is live.
+  -- The handle rather than a boolean, so callers can write to a live session.
   local function alive()
     if term ~= nil and term.bufnr ~= nil and vim.api.nvim_buf_is_valid(term.bufnr) then
       return term
     end
   end
 
-  -- toggleterm resolves the split origin from the current window, and probes
-  -- win_gettype(0) to float-test a not-yet-opened terminal -- so opening from a
-  -- float (the prompt box) throws "Invalid terminal direction". A normal window
-  -- first; the last one stands when there is nothing else, which there always is.
+  -- toggleterm float-tests a not-yet-opened terminal with win_gettype(0), so
+  -- opening from a float throws "Invalid terminal direction".
   local function normal_win()
     for _, win in ipairs(vim.api.nvim_list_wins()) do
       if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative == '' then
@@ -102,8 +88,8 @@ function M.panel(opts)
     t:open(size())
     vim.cmd 'stopinsert'
     vim.schedule(function()
-      -- Only when nothing else moved focus since: the prompt box sets its float
-      -- current right after show() returns, and this restore would steal it back.
+      -- Only if nothing else moved focus since: the prompt box goes current
+      -- right after show() returns, and this would steal it back.
       if
         vim.api.nvim_win_is_valid(origin)
         and t.window
@@ -122,20 +108,18 @@ function M.panel(opts)
     term = nil
   end
 
-  -- Replaces any running session: the command is fixed when the job spawns, so
-  -- flags cannot be applied to a live one.
+  -- Replaces any running session: the command is fixed when the job spawns.
   local function start(args, focus)
     kill()
     term = new(opts.exe .. (args and ' ' .. args or ''))
     if focus then
-      -- --resume, whose session picker is inside the TUI; leave focus on the panel.
+      -- --resume: its session picker is inside the TUI.
       vim.api.nvim_set_current_win(normal_win())
       term:open(size())
     else
       show(term)
     end
-    -- Dropped once in argv, so a respawn starts plain rather than replaying
-    -- --continue or the opening prompt.
+    -- Dropped once used, so a respawn does not replay --continue.
     term.cmd = opts.exe
   end
 
@@ -151,9 +135,8 @@ function M.panel(opts)
     end
   end
 
-  -- Raw bytes to the pty without moving focus. Guarded because chansend throws on
-  -- a channel whose job has exited, and close_on_exit is off so the buffer outlives
-  -- the process.
+  -- Guarded: chansend throws on a dead channel, and close_on_exit is off so the
+  -- buffer outlives the process.
   local function send_raw(keys)
     local t = alive()
     if not t then
@@ -168,7 +151,6 @@ function M.panel(opts)
     return true
   end
 
-  -- One key, one byte sequence: the backend's keymaps are all "press this in the TUI".
   local function sender(keys)
     return function()
       send_raw(keys)
@@ -189,12 +171,11 @@ function M.panel(opts)
         start()
       end
     end,
-    -- No bracketed paste, so a raw newline would submit each line as its own turn.
+    -- No bracketed paste, so a raw newline submits each line as its own turn.
     submit = function(text)
       return send_raw((text:gsub('%s*\r?\n%s*', ' ')) .. '\r')
     end,
-    -- No nvim-side picker, so both session keys open the TUI's own. Focused,
-    -- unlike the rest: the picker is inside the TUI.
+    -- No nvim-side picker, so both session keys open the TUI's own.
     find_session = function()
       start('--resume', true)
     end,

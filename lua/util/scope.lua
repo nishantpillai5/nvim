@@ -1,10 +1,3 @@
--- neoscopes wrapper. A "scope" is a named subset of the repo (dirs + globs);
--- when one is active, the telescope pickers narrow to it.
---
--- The old config swapped seven telescope keymaps in and out whenever a scope was
--- selected or cleared. That needed a keymaps() function to re-invoke, which the
--- lazy `keys` spec has no equivalent for -- so the pickers consult the scope at
--- call time instead, and there is no restore path to get wrong.
 local M = {}
 
 M.icon = ' '
@@ -37,8 +30,7 @@ function M.dirs()
   return ok and dirs or nil
 end
 
--- Narrow a picker's opts to the active scope. A no-op when none is selected, so
--- every keymap can route through it unconditionally.
+-- A no-op when no scope is selected, so every keymap can route through it.
 function M.apply(opts)
   opts = opts or {}
   local dirs = M.dirs()
@@ -52,11 +44,10 @@ function M.apply(opts)
   return opts
 end
 
--- Split the active scope into ripgrep globs and search dirs, for live_grep over a
--- file list. Returns opts, extra rg args, extra search dirs.
+-- Returns opts, extra rg args and extra search dirs, for live_grep over a list.
 function M.constrain(opts)
-  -- Same as M.apply: the no-scope path returns opts untouched, so a nil would
-  -- only blow up once a scope was active.
+  -- As in M.apply: the no-scope path returns opts untouched, so a nil here
+  -- would only blow up once a scope was active.
   opts = opts or {}
   local scope = M.current()
   if not scope then
@@ -88,11 +79,8 @@ function M.constrain(opts)
   return opts, glob_args, search_dirs
 end
 
--- Name for the lualine indicator, and empty when no scope is selected. It used
--- to fall back to a circle-slash glyph, which reads as "scoping is off" --
--- a claim on the statusline where there is nothing to say. lualine draws an
--- empty component as nothing at all, padding included, so '' hides the
--- component rather than leaving a hole.
+-- Empty when no scope is selected: lualine draws an empty component as nothing
+-- at all, padding included, so '' hides it rather than leaving a hole.
 function M.status()
   local name = M.name()
   return name and (M.icon .. name) or ''

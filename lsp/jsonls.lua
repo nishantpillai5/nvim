@@ -1,8 +1,6 @@
--- The schema catalog is attached in `on_init`, which runs once the server has
--- started, so schemastore.nvim stays out of startup. A top-level require would
--- load it immediately, because vim.lsp.enable reads this file eagerly.
--- It mutates `client.settings`, not the config table: Neovim pushes
--- client.settings to the server via workspace/didChangeConfiguration.
+-- In `on_init`, or vim.lsp.enable's eager read of this file pulls
+-- schemastore.nvim into startup. It mutates `client.settings`, which Neovim
+-- pushes to the server, not the config table.
 return {
   cmd = { 'vscode-json-language-server', '--stdio' },
   filetypes = { 'json', 'jsonc' },

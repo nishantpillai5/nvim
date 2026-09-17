@@ -1,6 +1,5 @@
--- Replaces nvim-spectre; same three keys the old config bound. `maplocalleader`
--- is space here, so grug-far's buffer-local keymaps (`<localleader>r` replace,
--- `q` qflist, `c` close) shadow the global `<leader>` groups inside its buffer.
+-- `maplocalleader` is space here, so grug-far's buffer-local keymaps shadow the
+-- global `<leader>` groups inside its buffer.
 return {
   {
     'MagicDuck/grug-far.nvim',

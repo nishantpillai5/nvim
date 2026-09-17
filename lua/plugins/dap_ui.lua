@@ -1,13 +1,6 @@
--- The docked debugger views: scopes, breakpoints, stacks, watches, console and
--- REPL. edgy.lua already has a slot for each of those filetypes, so they dock
--- rather than splitting wherever they land.
-
--- While the views are open, K evaluates instead of hovering. The old config set
--- this buffer-locally at toggle time, which meant it stopped working the moment
--- you moved to another buffer -- inspecting values across files is the whole
--- point, so the mappings are global here and removed again on close. Deleting
--- them restores Neovim's built-in K: hover on an LSP buffer, keywordprg
--- otherwise (core/lsp.lua adds no mapping of its own).
+-- The docked debugger views; edgy.lua has a slot for each filetype. While they
+-- are open K evaluates instead of hovering, mapped globally rather than per
+-- buffer because inspecting values across files is the point.
 local dapui_open = false
 
 local function set_eval_keys(enable)

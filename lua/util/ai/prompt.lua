@@ -1,18 +1,12 @@
--- The prompt box: a centered float for composing a message, with @file and
--- /command completion, a preview of the backend's reply, and a menu for
--- answering a structured question -- all without focusing the agent's terminal.
---
--- Backend-agnostic, through util.ai `call` and `try`. `try` returning nil is
--- load-bearing: both scrapers read a *terminal*, so a backend that cannot scrape
--- must return nothing rather than draw its ghost text from the other agent's
--- input box and answer that agent's pending question.
+-- A centered float for composing a message without focusing the agent's
+-- terminal. `try` returning nil is load-bearing: both scrapers read a
+-- *terminal*, so a backend without one must not answer the other's question.
 
 local ai = require 'util.ai'
 
 local M = {}
 
--- Cached for the lifetime of one box (attach_completion drops it on open). A
--- backend that publishes none disables the "/" half of the menu.
+-- Per box; attach_completion drops it on open. nil disables the "/" menu.
 local slash_cache = nil
 
 local function slash_commands()
@@ -22,15 +16,14 @@ local function slash_commands()
   return slash_cache or nil
 end
 
--- Files *and* directories under cwd, so a fragment fuzzy matches the whole path
--- ("clcode" -> lua/plugins/claudecode.lua) instead of walking one level at a
--- time the way getcompletion() does. Cached like slash_cache.
+-- Files *and* directories, so a fragment fuzzy matches the whole path
+-- ("clcode" -> lua/plugins/claudecode.lua) instead of one level at a time.
 local file_cache = nil
 
 -- The fuzzy match ranks the whole tree; thousands of rows only slow the redraw.
 local MAX_FILE_ITEMS = 200
 
--- nil when the tool is missing, fails, or says nothing: try the next fallback.
+-- nil when the tool is missing, fails or says nothing: fall through.
 local function lister_output(cmd)
   local ok, res = pcall(function()
     return vim.system(cmd, { cwd = vim.fn.getcwd(), text = true }):wait(3000)
@@ -42,7 +35,6 @@ local function lister_output(cmd)
   return #lines > 0 and lines or nil
 end
 
--- Every path under cwd, relative and with directories marked by a trailing "/".
 local function project_files()
   if file_cache then
     return file_cache
@@ -81,23 +73,17 @@ local function project_files()
   return paths
 end
 
--- Completes @file paths and /commands through the built-in popup menu. Two
--- things make a *path* different from a keyword, and both are why this is
--- re-driven from a TextChanged autocmd rather than only from <C-n>: the menu
--- ends on any character outside 'iskeyword', and "/" is one; and complete()
--- takes a *static* list, so "@lua"'s candidates would still be the parent's once
--- you reach "@lua/". Recomputing per typed character fixes both.
+-- Re-driven from TextChanged because a path is not a keyword: the menu ends on
+-- "/", and complete()'s list is static, so "@lua"'s would stand at "@lua/".
 local function prompt_complete()
   local before = vim.api.nvim_get_current_line():sub(1, vim.fn.col '.' - 1)
 
-  -- Only when the line is a leading slash token, and only if the backend
-  -- publishes commands -- never another agent's.
+  -- Only this backend's commands, never another agent's.
   if before:match '^%s*/%S*$' then
     local names = slash_commands()
     if not names then
       return false
     end
-    -- The match above guarantees a slash token, so find cannot return nil.
     local start = assert(before:find '/%S*$')
     local items = {}
     for _, name in ipairs(names) do
@@ -107,9 +93,8 @@ local function prompt_complete()
     return true
   end
 
-  -- 'fuzzy' is in completeopt, so the menu's narrowing agrees with this ranking.
-  -- A token outside the project (absolute, ~, ./, ../) has no candidate list and
-  -- keeps prefix completion, which also backstops fd's ignore rules.
+  -- A token outside the project (absolute, ~, ./, ../) keeps prefix completion,
+  -- which also backstops fd's ignore rules.
   local at = before:find '@%S*$'
   if at then
     local partial = before:sub(at + 1)
@@ -132,11 +117,9 @@ local function prompt_complete()
   return false
 end
 
--- InsertCharPre fires only for a literally typed character, never for text the
--- menu inserts -- without it <C-n> would rebuild the menu out from under the
--- cursor. TextChangedP is needed too: only it fires while the menu is open.
+-- InsertCharPre fires only for a typed character, never for what the menu
+-- inserts; TextChangedP is the only one that fires while the menu is open.
 local function attach_completion(buf)
-  -- One box, one directory walk each.
   slash_cache = nil
   file_cache = nil
   local typed = false
@@ -153,7 +136,7 @@ local function attach_completion(buf)
         return
       end
       typed = false
-      -- Swallowed, or a bad keystroke reports on every character typed.
+      -- Swallowed, or a bad keystroke reports on every character.
       pcall(prompt_complete)
     end,
   })
@@ -162,8 +145,7 @@ end
 local ghost_ns = vim.api.nvim_create_namespace 'ai_prompt_ghost'
 local context_ns = vim.api.nvim_create_namespace 'ai_prompt_context'
 
--- Keeps the origin selection visible while the float is open. `vsel` is a
--- 1-indexed linewise {start, end} or nil; returns a function that clears it.
+-- `vsel` is a 1-indexed linewise {start, end} or nil; returns its clear fn.
 local function highlight_origin_selection(buf, vsel)
   if not vsel or not vim.api.nvim_buf_is_valid(buf) then
     return function() end
@@ -183,8 +165,7 @@ local function highlight_origin_selection(buf, vsel)
 end
 
 local function open_prompt_input()
-  -- Captured BEFORE the float takes focus. It becomes a prefilled @-mention, so
-  -- it is sent only on submit and escaping leaves nothing in the terminal.
+  -- Captured BEFORE the float takes focus, and only sent on submit.
   local origin_buf = vim.api.nvim_get_current_buf()
   local origin_mode = vim.fn.mode()
   local vsel
@@ -194,8 +175,7 @@ local function open_prompt_input()
   end
   local clear_origin_highlight = highlight_origin_selection(origin_buf, vsel)
 
-  -- Starting is deferred to the end: opening here would steal the redraw and the
-  -- box would never appear.
+  -- Started at the end: opening here steals the redraw and the box never shows.
   local need_terminal = not ai.call 'term_buf'
 
   local width = math.min(100, math.max(40, math.floor(vim.o.columns * 0.7)))
@@ -204,23 +184,18 @@ local function open_prompt_input()
   vim.bo[buf].bufhidden = 'wipe'
   vim.b[buf].ai_prompt = true
   local suggestion = ai.try 'scrape_suggestion'
-  -- With no selection nothing is prefilled, so a whole file is never force-fed
-  -- into context and the suggested-reply ghost keeps its behaviour.
   local prefill
   if vsel then
     local mention = ai.try('mention', origin_buf, vsel)
     if mention then
       prefill = mention .. ' '
-      suggestion = nil -- the prefilled selection replaces the suggested-reply ghost
+      suggestion = nil -- the prefill replaces the suggested-reply ghost
     end
   end
   local suggestion_lines = suggestion and vim.split(suggestion, '\n')
 
-  -- llama has no per-buffer guard, so left alone it renders its own FIM ghost
-  -- and rebinds <Tab> over the backend's suggestion: suppress it while the box is
-  -- empty. 'pumheight' drops to 8 because Neovim decides whether the menu fits
-  -- below the cursor from it rather than the real candidate count, and at 12 the
-  -- menu flips above and lands on this centred box. Both restored on close.
+  -- llama has no per-buffer guard and would rebind <Tab>. 'pumheight' drops to
+  -- 8, which is how Neovim decides the menu fits below. Both restored on close.
   local saved_pumheight = vim.o.pumheight
   vim.o.pumheight = math.min(saved_pumheight, 8)
   local function restore_pumheight()
@@ -242,8 +217,7 @@ local function open_prompt_input()
     end
   end
 
-  -- minuet only enables itself from a FileType autocmd, which a scratch buffer
-  -- never fires, so drive its flag by hand: on while composing, off while empty.
+  -- minuet enables itself from a FileType autocmd a scratch buffer never fires.
   local has_minuet, minuet_vt = pcall(require, 'minuet.virtualtext')
   local function set_minuet(on)
     if not has_minuet then
@@ -276,8 +250,7 @@ local function open_prompt_input()
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
 
-  -- Before our keymaps: llama#disable() unmaps <buffer> <Tab>/<S-Tab> outright,
-  -- taking ours with it. Off for the box's lifetime; restored on wipeout.
+  -- Before our keymaps: llama#disable() unmaps <buffer> <Tab>/<S-Tab> outright.
   suppress_llama()
 
   local function fit_height()
@@ -302,10 +275,9 @@ local function open_prompt_input()
     return #l == 1 and l[1] == ''
   end
 
-  -- Preview Claude's suggested reply as greyed ghost text while the box is empty.
+  -- The backend's suggested reply, as ghost text while the box is empty.
   local function render_ghost()
     vim.api.nvim_buf_clear_namespace(buf, ghost_ns, 0, -1)
-    -- Guarded on the split, the one indexed below; both are set together.
     local slines = suggestion_lines
     if not (slines and buffer_is_empty()) then
       return
@@ -320,8 +292,7 @@ local function open_prompt_input()
     vim.api.nvim_buf_set_extmark(buf, ghost_ns, 0, 0, ext)
   end
 
-  -- TextChangedP too: only it fires while the menu is open, and without it the
-  -- box freezes at the height it had when the menu appeared.
+  -- TextChangedP too, or the box freezes at its height while the menu is open.
   vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'TextChangedP' }, {
     buffer = buf,
     callback = function()
@@ -347,8 +318,8 @@ local function open_prompt_input()
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
     local sending = send and text:gsub('%s', '') ~= ''
 
-    -- Before tearing the float down: the buffer is bufhidden=wipe, so closing
-    -- first and then failing to send lost whatever had been composed.
+    -- Before tearing the float down: bufhidden=wipe, so a failed send after
+    -- closing lost whatever had been composed.
     if sending and not ai.call('submit', text) then
       return
     end
@@ -364,7 +335,6 @@ local function open_prompt_input()
       vim.cmd 'stopinsert'
     end)
   end
-  -- Normal-mode controls are always available.
   vim.keymap.set('n', '<CR>', function()
     finish(true)
   end, { buffer = buf })
@@ -383,7 +353,6 @@ local function open_prompt_input()
     finish(false)
   end, { buffer = buf })
 
-  -- Replace the empty prompt with Claude's suggested reply, cursor at its end.
   local function accept_suggestion()
     local slines = suggestion_lines
     if not (slines and buffer_is_empty()) then
@@ -396,8 +365,6 @@ local function open_prompt_input()
     return true
   end
 
-  -- <C-e> needs no mapping, Neovim already aborts with it; <C-n> is the explicit
-  -- trigger for reopening the menu after one.
   attach_completion(buf)
 
   local function feed(keys)
@@ -420,13 +387,12 @@ local function open_prompt_input()
     end, { buffer = buf })
   end
 
-  -- <Tab>: accept the completion if the menu is open, else minuet's ghost, else
-  -- Claude's previewed suggestion if there is one, else insert a literal tab.
+  -- Menu, then minuet's ghost, then the previewed suggestion, then a real tab.
   -- Buffer-local, so it wins over minuet's own global <Tab> accept map.
   vim.keymap.set('i', '<Tab>', function()
     if vim.fn.pumvisible() == 1 then
-      -- 'noselect' means <C-y> with nothing highlighted just dismisses, leaving
-      -- a fuzzy token like "@clcode" behind -- take the top entry instead.
+      -- 'noselect': <C-y> with nothing highlighted would dismiss and leave a
+      -- fuzzy token like "@clcode" behind, so take the top entry.
       feed(vim.fn.complete_info({ 'selected' }).selected == -1 and '<C-n><C-y>' or '<C-y>')
     elseif minuet_visible() then
       pcall(minuet_vt.action.accept)
@@ -447,8 +413,7 @@ local function open_prompt_input()
   end
   render_ghost()
 
-  -- Deferred so the float is realized first. The backend may focus its new
-  -- terminal, so pull focus back to the box.
+  -- Deferred so the float is realized first; the backend may steal focus.
   if need_terminal then
     vim.schedule(function()
       ai.call 'show'
@@ -460,7 +425,6 @@ local function open_prompt_input()
   end
 end
 
--- Find the scraped option at display position `pos`.
 local function opt_by_pos(q, pos)
   for _, o in ipairs(q.options) do
     if o.pos == pos then
@@ -469,9 +433,8 @@ local function opt_by_pos(q, pos)
   end
 end
 
--- Option NUMBER keys, the TUI's shortcut -- synthetic arrow keys were not
--- reliable. Single-select advances on its own; multi-select only toggles, so
--- press the numbers whose state differs from what is checked, then Tab.
+-- Option NUMBER keys, the TUI's shortcut -- synthetic arrows were unreliable.
+-- Multi-select only toggles, so press the numbers that differ, then Tab.
 local function choice_keys(q, chosen)
   local keys = {}
   if #chosen == 0 then
@@ -493,12 +456,11 @@ local function choice_keys(q, chosen)
       keys[#keys + 1] = tostring(o.num)
     end
   end
-  keys[#keys + 1] = '\t' -- multi-select numbers only toggle; Tab advances the tab
+  keys[#keys + 1] = '\t'
   return keys
 end
 
--- Spaced out: consecutive digits read as one number, so "1" and "3" sent
--- together look like option 13.
+-- Spaced out: "1" and "3" sent together read as option 13.
 local function send_keys_seq(keys, i)
   i = i or 1
   if i > #keys then
@@ -510,8 +472,6 @@ local function send_keys_seq(keys, i)
   end, 80)
 end
 
--- Telescope menu of the current tab's options. <CR> confirms; for multi-select
--- questions, <Tab>-mark several first.
 local function pick_option(q)
   local pickers = require 'telescope.pickers'
   local finders = require 'telescope.finders'
@@ -574,8 +534,8 @@ local function pick_option(q)
         map('i', '<CR>', confirm)
         map('n', '<CR>', confirm)
         if q.multiselect then
-          -- Plain toggle_selection is what get_multi_selection() reads back; a
-          -- composed action showed a mark but did not register it.
+          -- What get_multi_selection() reads back; a composed action showed a
+          -- mark but did not register it.
           map('i', '<Space>', actions.toggle_selection)
           map('n', '<Space>', actions.toggle_selection)
           map('i', '<Tab>', actions.toggle_selection)
@@ -587,8 +547,7 @@ local function pick_option(q)
     :find()
 end
 
--- Answers a live structured question when the backend can see one, else the
--- free-text box. A backend with no scraper always gets the box.
+-- A live structured question when the backend can see one, else the box.
 function M.open()
   local q = ai.try 'scrape_question'
   if not q then

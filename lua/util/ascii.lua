@@ -87,9 +87,8 @@ M.work_logos = {
   },
 }
 
--- Dashboard header. Outside a work/present context this is always the default
--- logo; inside one it's `_G.LOGO` when a project-local exrc pins a specific one,
--- otherwise a rotating pick from `work_logos`.
+-- The default logo outside a work/present context; inside one, `_G.LOGO` if a
+-- project-local exrc pins one, else a rotating pick from `work_logos`.
 function M.logo()
   local context = require('util.env').NVIM_CONTEXT
   if context ~= 'work' and context ~= 'present' then
@@ -104,8 +103,7 @@ function M.logo()
     return M.default_logo
   end
 
-  -- Rotates over time rather than being random per start, so it stays stable
-  -- across a reload within the same second.
+  -- Over time rather than per start, so a reload within the second is stable.
   return M.work_logos[os.time() % #M.work_logos + 1]
 end
 

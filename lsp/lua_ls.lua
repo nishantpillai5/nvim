@@ -1,6 +1,5 @@
--- Neovim discovers `lsp/<name>.lua` on the runtimepath and merges it into
--- `vim.lsp.config` when `vim.lsp.enable('<name>')` runs. No nvim-lspconfig.
--- lazydev.nvim supplies the workspace library, so there's no on_init hook here.
+-- Merged into `vim.lsp.config` by `vim.lsp.enable`, off the runtimepath; no
+-- nvim-lspconfig. lazydev.nvim supplies the workspace library.
 return {
   cmd = { 'lua-language-server' },
   filetypes = { 'lua' },

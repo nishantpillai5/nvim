@@ -2,8 +2,7 @@ local augroup = function(name)
   return vim.api.nvim_create_augroup('core_' .. name, { clear = true })
 end
 
--- Don't continue comments onto new lines. FileType, because ftplugins set
--- formatoptions and would otherwise win.
+-- FileType, because ftplugins set formatoptions and would otherwise win.
 vim.api.nvim_create_autocmd('FileType', {
   group = augroup 'formatoptions',
   desc = 'disable auto-commenting new lines',
@@ -53,16 +52,13 @@ vim.api.nvim_create_autocmd('BufEnter', {
   pattern = 'term://*',
   desc = 'jump to newest output in normal mode so scrollback stays readable',
   callback = function()
-    -- Deferred, in case we immediately switch back out of the buffer.
+    -- Deferred, in case we switch straight back out of the buffer.
     vim.defer_fn(function()
       if vim.bo.buftype ~= 'terminal' then
         return
       end
-      -- Agent terminals manage their own insert and scroll behaviour --
-      -- claudecode.lua pins unfocused windows to the newest output, omp.lua
-      -- keeps its panel readable -- so leave them alone. util.ai matches on the
-      -- command's basename rather than a substring, which is what keeps `omp`
-      -- from matching docker-compose.
+      -- Agent terminals manage their own insert and scroll behaviour, so leave
+      -- them alone. util.ai matches argv[0]'s basename, not a substring.
       if require('util.ai').is_agent_terminal(0) then
         return
       end

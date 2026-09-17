@@ -44,10 +44,8 @@ return {
         date_format = '%Y.%m.%d',
         template = 'daily.md',
       },
-      -- The old config's `nvim_cmp = true` is gone from obsidian upstream:
-      -- completion now comes from its own in-process `obsidian-ls` LSP server, so
-      -- it lands in the native menu core/lsp.lua already autotriggers. min_chars
-      -- is all that is left to carry over.
+      -- Completion comes from obsidian's in-process `obsidian-ls`, so it lands
+      -- in the native menu core/lsp.lua already autotriggers.
       completion = { min_chars = 2 },
       picker = {
         name = 'telescope.nvim',
@@ -58,14 +56,8 @@ return {
     config = function(_, opts)
       require('obsidian').setup(opts)
 
-      -- With the vault as cwd there is no code to find, so the four general
-      -- finders become obsidian's. Done here rather than in telescope.lua
-      -- because the override only makes sense once obsidian is loaded.
-      --
-      -- Applied and *undone* on DirChanged: these are global maps, so setting
-      -- them once at load meant a :cd out of the vault left <leader>ff still
-      -- searching notes for the rest of the session. maparg/mapset round-trips
-      -- whatever telescope had there (including lazy's not-yet-loaded stub).
+      -- With the vault as cwd the general finders become obsidian's. Applied
+      -- and *undone* on DirChanged, since they are global maps.
       local OVERRIDES = {
         { '<leader>ff', ':Obsidian quick_switch<cr>', 'files(notes)' },
         { '<leader>?', ':Obsidian search<cr>', 'find_global(notes)' },
@@ -75,8 +67,7 @@ return {
       local saved = nil
 
       -- Resolved on both sides: vim.uv.cwd() reports the real path, so a vault
-      -- reached through a symlink (~/notes -> a cloud folder, /tmp -> /private/tmp
-      -- on macOS) would never compare equal to the configured one.
+      -- reached through a symlink would never compare equal.
       local function same_dir(a, b)
         if a == '' or b == '' then
           return false

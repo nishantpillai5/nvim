@@ -1,6 +1,5 @@
--- Favourite directories, for the two <leader>f keys below. `_G.fav_dirs` is the
--- per-project half: plugins/config_local.lua loads a repo's .nvim.lua before
--- this runs, and whatever it sets there wins over the names below.
+-- `_G.fav_dirs` is the per-project half: a repo's .nvim.lua is loaded before
+-- this runs, and whatever it sets there wins.
 local function select_fav(callback)
   local env = require 'util.env'
   local dirs = vim.tbl_extend('force', {
@@ -49,12 +48,11 @@ return {
         desc = 'fav_dirs_external',
       },
     },
-    -- oil's win_options.winbar takes a vimscript expression, so the function it
-    -- calls has to be reachable from v:lua -- hence the global.
+    -- win_options.winbar takes a vimscript expression, so this has to be
+    -- reachable from v:lua.
     init = function()
       _G.oil_winbar = function()
-        -- statusline_winid is only set while a statusline/winbar is being
-        -- evaluated; fall back so the function is safe to call directly.
+        -- Only set while a winbar is being evaluated, so this stays callable.
         local winid = vim.g.statusline_winid
         local bufnr = (winid and winid ~= 0) and vim.api.nvim_win_get_buf(winid) or vim.api.nvim_get_current_buf()
         local dir = require('oil').get_current_dir(bufnr)
@@ -62,8 +60,7 @@ return {
           -- No local directory, e.g. over ssh: fall back to the buffer name.
           return vim.api.nvim_buf_get_name(bufnr)
         end
-        -- `dir` carries a trailing slash, so when it *is* the cwd, ':.' yields ''
-        -- rather than '.'. Both mean "here", and both need the absolute form.
+        -- `dir` has a trailing slash, so ':.' yields '' for the cwd, not '.'.
         local rel = vim.fn.fnamemodify(dir, ':~:.')
         if rel == '' or rel == '.' then
           return vim.fn.fnamemodify(dir, ':~')

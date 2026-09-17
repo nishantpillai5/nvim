@@ -10,9 +10,8 @@ return {
       'alfaix/neotest-gtest',
     },
     keys = {
-      -- <leader>ii and <leader>iI are also bound buffer-locally under the config
-      -- directory (core/keymaps.lua, source_config_*); the local mapping wins
-      -- there, these apply everywhere else.
+      -- Also bound buffer-locally under the config directory, where that
+      -- mapping wins; these apply everywhere else.
       {
         '<leader>ii',
         function()
@@ -28,9 +27,8 @@ return {
         desc = 'run_file',
       },
       {
-        -- gtest only in practice: the python adapter this needs is registered by
-        -- plugins/dap_python.lua, which is disabled in lua/enabled.lua. On a
-        -- python test this reports "no adapter for python" until that is on.
+        -- gtest only in practice: the python adapter comes from
+        -- plugins/dap_python.lua, which lua/enabled.lua has off.
         '<leader>id',
         function()
           ---@diagnostic disable-next-line: missing-fields
@@ -73,8 +71,7 @@ return {
         end,
         desc = 'tests',
       },
-      -- The old config had these two the wrong way round; ] is next here, as
-      -- everywhere else in this config.
+      -- ] is next, as everywhere else in this config.
       {
         ']i',
         function()
@@ -98,8 +95,7 @@ return {
           require 'neotest-python' {},
         },
         consumers = {
-          -- The consumer is a table with a __call metamethod, which lua_ls does
-          -- not count as matching the `fun(client)` the field is annotated with.
+          -- A table with __call, which lua_ls does not count as a `fun(client)`.
           ---@diagnostic disable-next-line: assign-type-mismatch
           overseer = require 'neotest.consumers.overseer',
         },

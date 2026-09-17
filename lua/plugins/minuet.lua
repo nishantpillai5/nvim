@@ -1,4 +1,4 @@
--- AI ghost-text completion against llama-server (~/.models/coder.sh, port 8012).
+-- Ghost-text completion against llama-server (~/.models/coder.sh, port 8012).
 -- The FIM provider posts prefix+suffix, so no chat scaffolding applies.
 return {
   {
@@ -44,14 +44,14 @@ return {
           -- Env-var name (minuet looks it up); TERM always exists, no auth needed.
           api_key = 'TERM',
           end_point = 'http://127.0.0.1:8012/v1/completions',
-          -- Empty so the statusline shows nothing until the server names the model
-          -- (lualine.lua). llama-server ignores it; vLLM needs its served name.
+          -- Empty so the statusline shows nothing until the server names the
+          -- model. llama-server ignores it; vLLM needs its served name.
           model = '',
           name = 'llama.cpp',
           optional = {
             max_tokens = 64, -- hard ceiling; `stop` should end it well before this
-            -- Without these an instruct model writes whole functions past the
-            -- cursor, emitting the FIM markers as text instead of ending the turn.
+            -- Without these an instruct model writes past the cursor, emitting
+            -- the FIM markers as text instead of ending the turn.
             stop = {
               '\n\n',
               '<|fim_prefix|>',

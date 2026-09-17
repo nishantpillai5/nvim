@@ -1,5 +1,4 @@
--- Group labels for the prefixes this config actually binds. Add entries here as
--- new topic files land; a group for a prefix with no keys shows an empty menu.
+-- Only the prefixes this config binds: a group with no keys shows an empty menu.
 return {
   {
     'folke/which-key.nvim',
@@ -16,9 +15,6 @@ return {
         spec = {
           { '<leader>', group = 'Leader' },
           { '<leader>;', group = 'Strudel' },
-          -- One group for every AI backend; <leader>ab switches which one the
-          -- group talks to. <leader>c is free -- it was OMP's, before the
-          -- dispatch made a second group redundant.
           { '<leader>a', group = 'Agent', mode = { 'n', 'v' } },
           { '<leader>b', group = 'Breakpoint' },
           { '<leader>e', group = 'Explorer' },
@@ -36,8 +32,6 @@ return {
           { '<leader>gz', group = 'Stash' },
           { '<leader>h', group = 'Grapple' },
           { '<leader>ey', group = 'Yank' },
-          -- Tests, plus the two buffer-local source_config mappings that only
-          -- exist under the config directory (core/keymaps.lua).
           { '<leader>i', group = 'Test' },
           { '<leader>l', group = 'LSP', mode = { 'n', 'v' } },
           { '<leader>n', group = 'Notes', mode = { 'n', 'v' } },
@@ -54,10 +48,8 @@ return {
           { '<leader>zt', group = 'Pomodoro' },
           -- nvim-biscuits registers <leader>zC itself, from `toggle_keybind`.
           { '<leader>zC', desc = 'context_virtual' },
-          -- mini.surround installs its own mappings once loaded, overwriting
-          -- the descs on lazy's key stubs with its own sentence-case ones. The
-          -- `l` and `n` suffixes are its suffix_last / suffix_next, which search
-          -- the previous and next surrounding rather than the covering one.
+          -- mini.surround overwrites the descs on lazy's key stubs once loaded.
+          -- `l` / `n` are its suffix_last / suffix_next.
           { '<leader>v', desc = 'surround', mode = { 'n', 'x' } },
           { '<leader>Vd', desc = 'delete' },
           { '<leader>Vdl', desc = 'delete_prev' },
@@ -88,13 +80,10 @@ return {
           { 'z', group = 'Fold' },
           { ']', group = 'Next' },
           { '[', group = 'Prev' },
-          -- Bound by their plugins with no desc to read, so which-key shows the
-          -- raw rhs without these.
+          -- Bound with no desc, so which-key shows the raw rhs without these.
           { '<M-i>', desc = 'select_reference', mode = { 'x', 'o' } },
-          -- llama.vim's inst_accept / inst_cancel. :LlamaInstruct is the only
-          -- way to raise an instruction -- llama.lua clears the visual trigger
-          -- -- but these two take normal-mode <Tab> and <Esc> regardless, and
-          -- fall through to the builtins when no instruction is pending.
+          -- llama.vim's inst_accept / inst_cancel: they take normal-mode <Tab>
+          -- and <Esc> regardless, falling through when nothing is pending.
           { '<Tab>', desc = 'accept_instruction' },
           { '<Esc>', desc = 'cancel_instruction' },
           { 'y<C-G>', desc = 'yank_git_object' },
@@ -110,19 +99,13 @@ return {
     config = function(_, opts)
       require('which-key').setup(opts)
 
-      -- Colour buffer-local descriptions instead. which-key has no hook for it:
-      -- the highlight comes from `item.group` alone, and by render time a cell is
-      -- a bare padded string. So remember each local item's key/description pair
-      -- and recolour it on the way out -- rows go key, separator, icon, desc.
-      --
-      -- Keyed by the buffer the mapping belongs to, not just true: a global
-      -- mapping elsewhere that happens to share a key and description with some
-      -- buffer-local one seen earlier would otherwise be painted local too.
+      -- which-key has no hook for this: the highlight comes from `item.group`
+      -- alone, and by render time a cell is a bare padded string. So remember
+      -- each local item's key/desc pair -- keyed by buffer -- and recolour it.
       local locals = {}
 
-      -- view.item and text.append are which-key internals with no stability
-      -- promise. Patching them behind pcall so an upstream rename costs the
-      -- colour rather than turning every which-key popup into a Lua error.
+      -- which-key internals with no stability promise, so an upstream rename
+      -- costs the colour rather than every popup.
       local ok_view, view = pcall(require, 'which-key.view')
       local ok_text, text = pcall(require, 'which-key.text')
 

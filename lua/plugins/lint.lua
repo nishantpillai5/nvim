@@ -6,18 +6,15 @@ return {
       local lint = require 'lint'
 
       lint.linters_by_ft = {
-        -- cppcheck is broken upstream (mfussenegger/nvim-lint#745), so it stays
-        -- off: `available()` below only proves the binary exists, not that its
-        -- output parses, so leaving it listed surfaced the parser's own errors
-        -- on every BufEnter / InsertLeave / BufWritePost in a C file.
+        -- Broken upstream (mfussenegger/nvim-lint#745), and `available()` below
+        -- only proves the binary exists, not that its output parses.
         -- c = { 'cppcheck' },
         typescript = { 'eslint_d' },
         javascript = { 'eslint_d' },
       }
 
-      -- nvim-lint spawns a linter whether or not its binary exists, so a missing
-      -- one errors on every BufEnter / InsertLeave / BufWritePost. Resolve each
-      -- linter's command up front and run only what's actually installed.
+      -- nvim-lint spawns a linter whether or not its binary exists, so a
+      -- missing one errors on every lint event.
       local function available(names)
         local runnable = {}
         for _, name in ipairs(names or {}) do

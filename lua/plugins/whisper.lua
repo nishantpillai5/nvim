@@ -1,21 +1,14 @@
 -- Speech to text via whisper.cpp. <leader>nd comes from `keybind`; the lazy key
 -- is only a stub. <leader>ad arms dictation into the agent prompt box.
 --
--- Arming does not start whisper-stream: in VAD mode it holds the mic open and
--- runs large-v3 over the trailing window every time it hears anything at all
--- (stream.cpp:302), box or not. So the stream is spawned by the first prompt box
--- and torn down IDLE_MS after the last one closes, which within a session leaves
--- it warm across turns and charges only the first box for the load.
---
--- Saying one of the words in util/dictation.lua ends dictation and acts on the
--- box -- send it, or answer the dialog on screen or stop the turn the way
--- <leader>j / <leader>k / <leader>al do -- so a whole turn can be spoken without
--- reaching for the keyboard.
+-- Arming does not start whisper-stream: in VAD mode it would run large-v3 over
+-- the trailing window on any sound at all (stream.cpp:302), box or not. So the
+-- stream is spawned by the first box and torn down IDLE_MS after the last one.
+-- A word from util/dictation.lua ends dictation and acts on the box.
 
 local dictation = require 'util.dictation'
 
--- Whisper's stock captions for silence, matched against a whole line with
--- punctuation and spaces stripped.
+-- Whisper's stock captions for silence, matched punctuation- and space-free.
 local HALLUCINATED = {
   thankyou = true,
   thankyouverymuch = true,
@@ -27,8 +20,7 @@ local HALLUCINATED = {
   bye = true,
 }
 
--- Long enough to span an agent turn, short enough that walking away closes the
--- mic. It only buys back ~0.5s of load, so erring long costs more.
+-- Long enough to span a turn; it only buys back ~0.5s, so erring long costs.
 local IDLE_MS = 120000
 
 -- VAD mode re-transcribes the last `length_ms` on every fire and never clears
@@ -72,8 +64,8 @@ local function transcript_lines()
   return #vim.fn.readfile(temp)
 end
 
--- stop_polling ends in a final poll, which inserts at the cursor when its target
--- buffer is gone. Anything unread has to be written off first.
+-- stop_polling ends in a final poll that inserts at the cursor once its target
+-- buffer is gone, so anything unread has to be written off first.
 local function skip_pending()
   require('whisper.state').set_last_read_line(transcript_lines())
 end
@@ -108,8 +100,8 @@ local function stop_stream()
   end
 end
 
--- `timer` is captured: a box that opens and closes again in the tick before this
--- runs would otherwise be torn down by its predecessor.
+-- `timer` is captured, or a box reopened within the tick is torn down by its
+-- own predecessor.
 local function arm_idle()
   cancel_idle()
   local timer = vim.uv.new_timer()
@@ -125,15 +117,15 @@ local function arm_idle()
   )
 end
 
--- start_recording pins the insert position to the current window and starts
--- polling itself, so this needs the prompt box current and no attach after.
+-- start_recording pins the insert position and starts polling itself, so the
+-- prompt box has to be current here and nothing may attach after.
 local function start_stream()
   if not model_ready() then
     return false
   end
   local state = require 'whisper.state'
-  -- state.clear keeps model_loaded across runs, so a restart would otherwise
-  -- claim the fresh process is ready the moment it spawns. lualine reads it.
+  -- state.clear keeps model_loaded across runs, so a restart would claim the
+  -- fresh process is ready the moment it spawns.
   state.set_model_loaded(false)
   -- <C-g>: whisper never restores the mapping it takes, and <Tab> is claudecode's.
   require('whisper.audio').start_recording(cfg { manual_trigger_key = '<C-g>' })
@@ -149,12 +141,8 @@ local function attach(bufnr)
       return
     end
   else
-    -- A warm stream has been transcribing the room since the last box, and its
-    -- VAD window still holds the tail of whatever was said into the last one --
-    -- including the word that sent it. skip_pending() drops the lines already
-    -- written, but the next line re-transcribes that window, so last_words has
-    -- to survive the gap for drop_overlap to strip the echo instead of
-    -- replaying it into the fresh box.
+    -- A warm stream's VAD window still holds the tail of the last box, and the
+    -- next line re-transcribes it -- so last_words has to survive the gap.
     local cursor = vim.api.nvim_win_get_cursor(0)
     state.set_insert_position { buf = bufnr, row = cursor[1], col = cursor[2] }
     state.set_recording_buffer(bufnr)
@@ -176,9 +164,8 @@ local function detach()
   arm_idle()
 end
 
--- Press the box's own key rather than reimplementing what it does: sending,
--- cancelling, and the teardown that follows either belong to the prompt float in
--- util/ai/prompt.lua, and its insert-mode mappings are the one entry point.
+-- Sending, cancelling and the teardown after either belong to the prompt float
+-- in util/ai/prompt.lua, whose insert-mode mappings are the one entry point.
 local function press(lhs)
   local map = vim.fn.maparg(lhs, 'i', false, true)
   if map.buffer ~= 1 or not map.callback then
@@ -188,14 +175,9 @@ local function press(lhs)
   return true
 end
 
--- Run what a spoken trigger asked for. Called from the poll timer, so the box
--- has to still be the buffer whisper has been writing into.
---
--- Everything else goes to the agent's PTY through the same op its <leader> key
--- dispatches to -- answering whatever dialog is on screen, or stopping the turn
--- in flight -- without moving focus; the box is then cancelled rather than sent,
--- because what was spoken was not a prompt. The keystroke goes first -- <Esc>
--- wipes the buffer this is running in.
+-- Called from the poll timer, so the box has to still be current. Anything but
+-- `submit` dispatches through util.ai and cancels the box; the keystroke goes
+-- first, because <Esc> wipes the buffer this runs in.
 local function run_action(action)
   local buf = vim.api.nvim_get_current_buf()
   if not (vim.g.whisper_dictating and vim.b[buf].ai_prompt) then
@@ -210,7 +192,7 @@ end
 
 local function auto_dictate(bufnr)
   local state = require 'whisper.state'
-  -- Returning to a box we left has to re-attach, since BufLeave detached it.
+  -- Returning to a box we left re-attaches, since BufLeave detached it.
   if vim.g.whisper_dictating and state.get_recording_buffer() == bufnr then
     return
   end
@@ -224,8 +206,8 @@ local function auto_dictate(bufnr)
     })
   end
 
-  -- Deferred: the box moves the cursor past a prefilled @mention after
-  -- startinsert, and attach pins the insert position.
+  -- Deferred: the box moves the cursor past a prefilled @mention, and attach
+  -- pins the insert position.
   vim.schedule(function()
     if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_get_current_buf() == bufnr then
       attach(bufnr)
@@ -270,10 +252,8 @@ return {
       -- An unknown name is not an error: model.lua falls back to base.en.
       model = 'large-v3',
       keybind = '<leader>nd',
-      -- Buffer-local while a recording is live, so it shadows llama.vim's global
-      -- <Tab> accept-line (llama.lua) for that stretch and restores itself on
-      -- stop. Harmless in practice -- the prompt-box path rebinds to <C-g> anyway --
-      -- but that is why <Tab> stops accepting FIM ghost text mid-dictation.
+      -- Buffer-local while recording, so it shadows llama.vim's global <Tab>
+      -- accept-line for that stretch. The prompt-box path rebinds to <C-g>.
       manual_trigger_key = '<Tab>',
       -- Also strips VAD mode's [timestamp] prefixes, so it is load-bearing.
       filter_markers = true,
@@ -299,8 +279,7 @@ return {
       ---@diagnostic disable-next-line: duplicate-set-field
       audio.insert_streaming_text = function(text)
         local fresh = drop_overlap(text or '')
-        -- Only the prompt-box path listens for the trigger words; plain
-        -- <leader>nd dictation into a file keeps every word it hears.
+        -- Only the prompt-box path listens for the trigger words.
         local spoken, action = fresh, nil
         if vim.g.whisper_dictating then
           spoken, action = dictation.split(fresh)
@@ -309,9 +288,8 @@ return {
           insert_streaming_text(spoken)
         end
         if action then
-          -- Deferred: the poll that produced this chunk still has its own
-          -- last-read bookkeeping to do, and either action detaches out from
-          -- under it.
+          -- Deferred: the poll that produced this chunk still has last-read
+          -- bookkeeping to do, and either action detaches out from under it.
           vim.schedule(function()
             run_action(action)
           end)

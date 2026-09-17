@@ -1,16 +1,9 @@
--- The plugin list. Each entry is the plugin's lazy.nvim spec name -- the exact
--- string in lua/plugins/<file>.lua -- so the two can never drift apart.
+-- Each entry is the exact lazy.nvim spec name in lua/plugins/<file>.lua, so the
+-- two cannot drift; a name matching no spec is reported at startup. Comment a
+-- line out to drop that plugin's spec, keymaps, commands and config.
 --
--- Comment a line out to disable that plugin: its spec is dropped, and its
--- keymaps, commands and config go with it. Nothing else needs editing. A name
--- here that matches no spec is reported at startup, so a typo fails loudly
--- rather than silently disabling the plugin.
---
--- One caveat: a plugin that another spec lists in `dependencies` still gets
--- installed when you disable it here -- lazy pulls it in to satisfy the
--- dependency, just without the config in its file. Disabling
--- nvim-telescope/telescope.nvim while any telescope-* entry is live is the case
--- to watch.
+-- Caveat: something another spec lists in `dependencies` is still installed when
+-- disabled here, just without the config in its file.
 
 return {
   -- Theme ---------------------------------------------------------------------

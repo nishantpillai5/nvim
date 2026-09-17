@@ -1,8 +1,5 @@
--- Native LSP wiring. Nothing here needs a plugin: Neovim 0.12 supplies
--- vim.lsp.config / vim.lsp.enable, vim.lsp.completion and vim.diagnostic.
---
--- Server definitions live in <config>/lsp/<name>.lua. vim.lsp.enable reads them
--- eagerly, so this module is required after lazy.nvim is set up.
+-- Native LSP wiring; no plugin needed on Neovim 0.12. Server definitions live in
+-- <config>/lsp/<name>.lua, read eagerly -- so this loads after lazy.nvim.
 local SERVERS = {
   'lua_ls',
   'clangd',
@@ -13,8 +10,7 @@ local SERVERS = {
   'bashls',
 }
 
--- Mason package names for the servers above, plus the formatters conform.lua
--- and the linters lint.lua reference. Installed by :MasonInstallAll.
+-- Installed by :MasonInstallAll.
 local MASON_PACKAGES = {
   -- servers
   'lua-language-server',
@@ -33,8 +29,7 @@ local MASON_PACKAGES = {
   -- linters (plugins/lint.lua)
   'eslint_d',
   'cppcheck',
-  -- debug adapters (plugins/dap.lua): cpptools ships OpenDebugAD7 for the
-  -- cppdbg adapter, debugpy backs dap-python and neotest's <leader>id.
+  -- debug adapters (plugins/dap.lua): cpptools ships OpenDebugAD7 for cppdbg.
   'cpptools',
   'debugpy',
 }
@@ -44,8 +39,7 @@ vim.diagnostic.config {
   signs = false,
   severity_sort = true,
   underline = true,
-  -- 0.11+: opening the float on ]d / [d jumps. Same behaviour the removed
-  -- `jump.float = true` shim gave us.
+  -- 0.11+: the float opens on the ]d / [d jump.
   jump = {
     on_jump = function(_, bufnr)
       vim.diagnostic.open_float { bufnr = bufnr, scope = 'cursor', focus = false }
@@ -54,8 +48,7 @@ vim.diagnostic.config {
 }
 
 local function on_attach(client, bufnr)
-  -- Native completion. autotrigger fires while typing; without it the same menu
-  -- is available on <C-x><C-o>.
+  -- autotrigger fires while typing; without it the menu is on <C-x><C-o>.
   if client:supports_method 'textDocument/completion' then
     vim.lsp.completion.enable(true, client.id, bufnr, { autotrigger = true })
   end
@@ -64,10 +57,8 @@ local function on_attach(client, bufnr)
     vim.keymap.set(mode or 'n', lhs, rhs, { buffer = bufnr, silent = true, desc = desc })
   end
 
-  -- 0.11+ already binds grn (rename), gra (code action), grr (references),
-  -- gri (implementation), grt (type definition), gO (document symbols), K
-  -- (hover), and <C-s> (signature help, insert mode). What follows are the
-  -- <leader>l equivalents from the old config, kept for muscle memory.
+  -- 0.11+ already binds grn, gra, grr, gri, grt, gO, K and <C-s>; these are the
+  -- <leader>l equivalents, kept for muscle memory.
   map('<leader>la', vim.lsp.buf.code_action, 'action', { 'n', 'v' })
   map('<leader>lr', vim.lsp.buf.rename, 'rename')
   map('<leader>rl', vim.lsp.buf.rename, 'rename_with_lsp')
@@ -105,8 +96,7 @@ vim.api.nvim_create_autocmd('LspAttach', {
 
 vim.lsp.inlay_hint.enable()
 
--- Registers all servers; each is started only when its filetype and root
--- markers match.
+-- Each server starts only when its filetype and root markers match.
 vim.lsp.enable(SERVERS)
 
 vim.api.nvim_create_user_command('MasonInstallAll', function()

@@ -1,6 +1,5 @@
--- Which AI backend <leader>a talks to, and the registry they are declared in.
--- Safe to require from the lualine component: nothing here touches
--- claudecode.nvim or omp.nvim at load.
+-- Which AI backend <leader>a talks to. Safe to require from the lualine
+-- component: nothing here touches a backend's plugin at load.
 
 local M = {}
 
@@ -21,8 +20,7 @@ local BACKENDS = {
   {
     name = 'pi',
     exe = 'pi',
-    -- No plugin: the panel is the whole backend, so enabled.lua has no name to
-    -- gate it with and the executable on PATH is its only switch.
+    -- No plugin to gate it with, so the executable on PATH is its only switch.
     plugin = nil,
     icon = '󰚩',
   },
@@ -44,8 +42,7 @@ local function is_enabled(spec)
   return enabled_set[spec.plugin] == true
 end
 
--- vim.fn.executable stats every PATH entry, and PATH does not change under a
--- running session.
+-- vim.fn.executable stats every PATH entry, and PATH cannot change here.
 local executable = {}
 
 local function has_exe(spec)
@@ -57,7 +54,7 @@ local function has_exe(spec)
   return cached
 end
 
--- nil when usable, else why not -- shown in the picker and used to refuse it.
+-- nil when usable, else why not -- shown in the picker and used to refuse.
 local function unavailable(spec)
   if not is_enabled(spec) then
     return 'commented out of enabled.lua'
@@ -71,8 +68,7 @@ function M.available(spec)
   return unavailable(spec) == nil
 end
 
--- `omarchy default agent <name>` writes the bare name here. Omarchy hardcodes
--- $HOME/.config, so this does too rather than using env.XDG_CONFIG_HOME.
+-- Omarchy hardcodes $HOME/.config, so this does too rather than env.XDG_CONFIG_HOME.
 local OMARCHY_AGENT = vim.fs.normalize '~/.config/omarchy/defaults/agent'
 
 function M.omarchy_agent()
@@ -90,13 +86,12 @@ end
 local current = nil
 
 local function default_backend()
-  -- Omarchy's names match `name` above. One it names that has no backend here
-  -- (`codex`, `grok`) is not a fault -- fall through to declaration order.
+  -- A name with no backend here (`codex`, `grok`) is not a fault.
   local preferred = M.omarchy_agent()
   for _, spec in ipairs(BACKENDS) do
     if spec.name == preferred then
-      -- Stay on a backend Omarchy named even when broken, rather than hand the
-      -- keys to an agent nobody chose. Scheduled: get() can precede nvim-notify.
+      -- Stay on a named backend even when broken, rather than hand the keys to
+      -- an agent nobody chose. Scheduled: get() can precede nvim-notify.
       local why = unavailable(spec)
       if why then
         vim.schedule(function()
@@ -111,7 +106,7 @@ local function default_backend()
       return spec
     end
   end
-  -- Nothing installed: callers need no nil guard, and the ops report it anyway.
+  -- Nothing installed: callers need no nil guard, and the ops report it.
   return BACKENDS[1]
 end
 
@@ -126,7 +121,7 @@ function M.set(name)
   for _, spec in ipairs(BACKENDS) do
     if spec.name == name then
       current = spec
-      -- lualine only repaints on redraw, and nothing else dirties the tabline.
+      -- lualine repaints on redraw, and nothing else dirties the tabline.
       vim.cmd.redrawtabline()
       vim.api.nvim_exec_autocmds('User', { pattern = 'AiBackendChanged', modeline = false })
       return spec
@@ -135,8 +130,8 @@ function M.set(name)
   vim.notify('No such AI backend: ' .. tostring(name), vim.log.levels.WARN)
 end
 
--- Unavailable backends are listed too: "omp -- omp is not on PATH" answers what
--- a silently short menu would not. telescope is required inside, not at load.
+-- Unavailable backends are listed too: "omp -- omp is not on PATH" answers
+-- what a silently short menu would not.
 function M.pick()
   local pickers = require 'telescope.pickers'
   local finders = require 'telescope.finders'
@@ -192,8 +187,8 @@ function M.pick()
     :find()
 end
 
--- Registered at file-body level by each plugin file, which core/lazy.lua runs
--- while collecting specs -- so ops exist before the plugin loads, or without it.
+-- Registered at file-body level, which core/lazy.lua runs while collecting
+-- specs -- so ops exist before the plugin loads, or without it.
 local ops = {}
 
 function M.register(name, table_of_ops)
@@ -213,8 +208,8 @@ local function ensure_loaded(spec)
   end)
 end
 
--- For capabilities only some backends have. Returning nil is load-bearing and
--- deliberately not `call`'s warning -- see the note atop util/ai/prompt.lua.
+-- For capabilities only some backends have. Returning nil rather than `call`'s
+-- warning is load-bearing -- see the note atop util/ai/prompt.lua.
 function M.try(op, ...)
   local spec = M.get()
   local fn = ops[spec.name] and ops[spec.name][op]
@@ -225,8 +220,8 @@ function M.try(op, ...)
   return fn(...)
 end
 
--- Warns rather than no-ops: with two agents running, silence is
--- indistinguishable from having sent the keystroke to the wrong one.
+-- Warns rather than no-ops: with two agents running, silence looks the same as
+-- having sent the keystroke to the wrong one.
 function M.call(op, ...)
   local spec = M.get()
   local fn = ops[spec.name] and ops[spec.name][op]
@@ -243,8 +238,8 @@ function M.status()
   return spec.icon .. ' ' .. spec.name
 end
 
--- Anchored on the pid in "term://{cwd}//{pid}:{command}", and argv[0]'s basename
--- compared for equality: a substring test matches `omp` inside docker-compose.
+-- Anchored on the pid in "term://{cwd}//{pid}:{command}", and argv[0]'s
+-- basename by equality: a substring test matches `omp` in docker-compose.
 function M.backend_for_terminal(name)
   local cmd = name:match '//%d+:(.+)$' or name:match ':([^:]*)$'
   local argv0 = cmd and cmd:match '^%S+'

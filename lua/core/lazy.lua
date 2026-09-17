@@ -30,10 +30,8 @@ end
 
 vim.opt.rtp:prepend(lazypath)
 
--- Collect every spec under lua/plugins/, keyed by its lazy.nvim name, then emit
--- only the ones lua/enabled.lua asks for, in the order it lists them. Matching
--- on the spec's own name means the list holds the real plugin strings and cannot
--- drift from the files.
+-- Every spec under lua/plugins/, filtered and ordered by lua/enabled.lua.
+-- Keying on the spec's own name is what keeps that list from drifting.
 local plugins_dir = vim.fs.joinpath(vim.fn.stdpath 'config', 'lua', 'plugins')
 
 local by_name = {}
@@ -56,21 +54,18 @@ for _, name in ipairs(require 'enabled') do
 end
 
 if #missing > 0 then
-  -- A name with no matching spec is almost always a typo. Say so, rather than
-  -- silently leaving the plugin out.
+  -- Almost always a typo, so say so rather than silently dropping the plugin.
   vim.schedule(function()
     vim.notify('enabled.lua: no plugin spec matches ' .. table.concat(missing, ', '), vim.log.levels.WARN)
   end)
 end
 
--- Spec first, options second: with a single table lazy still reads it as the
--- options (it checks for a `spec` field), but lua_ls resolves that call against
--- LazySpec, where `dev` is the per-plugin boolean rather than this table.
+-- Spec first, options second: lazy reads a single table either way, but lua_ls
+-- resolves that call against LazySpec, where `dev` is a per-plugin boolean.
 require('lazy').setup(spec, {
   -- Plugins checked out locally are picked up from here via `dev = true`.
   dev = { path = require('util.env').NVIM_PLUGINS },
   change_detection = { notify = false },
-  -- luarocks integration is off; nothing here needs it, and leaving it on warns
-  -- on every start when luarocks isn't installed.
+  -- Nothing here needs luarocks, and leaving it on warns on every start.
   rocks = { enabled = false },
 })

@@ -1,10 +1,7 @@
 ---@meta
 
--- Hooks a project-local exrc file (see `lua/plugins/config_local.lua` for the
--- filenames it loads) may set to override a default. Nothing in this repo
--- assigns them, so without these declarations every read is an
--- `undefined-field` warning. `---@meta` makes this a definition file only: it
--- is never loaded at runtime.
+-- Hooks a project-local exrc file may set to override a default. Nothing here
+-- assigns them, so without these every read is an `undefined-field` warning.
 
 ---Overrides `util.ascii.logo()` in a work/present context.
 ---@type string[]|nil

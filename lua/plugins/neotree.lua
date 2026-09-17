@@ -1,5 +1,3 @@
--- Windows a file opened from the tree should not replace. aerial is the
--- addition: it docks beside the tree, so it was in the way of every open.
 local KEEP_OPEN = { 'terminal', 'Trouble', 'qf', 'edgy', 'aerial' }
 
 return {
@@ -23,8 +21,7 @@ return {
     },
     opts = {
       open_files_do_not_replace_types = KEEP_OPEN,
-      -- The root stays where the tree was opened; <leader>eE re-roots it at cwd,
-      -- which is what makes that key worth having next to <leader>ew.
+      -- The root stays where the tree was opened; <leader>eE re-roots at cwd.
       bind_to_cwd = false,
       close_if_last_window = true,
       filesystem = {

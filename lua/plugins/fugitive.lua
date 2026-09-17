@@ -1,8 +1,5 @@
--- `:Git <args>` re-parses its argument string: it splits on shell-style quoting
--- and expands %, # and <cfile>. Concatenating free text from vim.ui.input into
--- it therefore garbles any message containing a quote and splices the current
--- filename into any message containing a %. These three run git over argv
--- instead (util.git.run), then tell fugitive to refresh its status buffer.
+-- `:Git <args>` re-parses its arguments, splitting on shell quoting and
+-- expanding %, so free text garbles. These run git over argv instead.
 local function git_input(prompt, args_for, ok_msg)
   vim.ui.input({ prompt = prompt }, function(input)
     input = input and vim.trim(input)
@@ -10,7 +7,7 @@ local function git_input(prompt, args_for, ok_msg)
       return
     end
     if require('util.git').run(args_for(input), ok_msg(input)) then
-      -- Documented public API: fires FugitiveChanged and reloads the summary.
+      -- Public API: fires FugitiveChanged and reloads the summary.
       pcall(vim.fn.FugitiveDidChange)
     end
   end)
@@ -94,8 +91,8 @@ return {
       },
     },
     config = function()
-      -- Push/pull only inside the status buffer. These shadow the global
-      -- <leader>p / <leader>P clipboard maps for that buffer only.
+      -- These shadow the global <leader>p / <leader>P clipboard maps, in the
+      -- status buffer only.
       vim.api.nvim_create_autocmd('FileType', {
         group = vim.api.nvim_create_augroup('fugitive_buffer_keys', { clear = true }),
         pattern = 'fugitive',

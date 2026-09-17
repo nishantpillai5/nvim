@@ -9,15 +9,13 @@ function M.get_cmd(task)
   if type(task.cmd) == 'table' then
     return table.concat(task.cmd, ' ')
   end
-  -- Overseer's orchestrator and function strategies build tasks with no cmd at
-  -- all, and this feeds the lualine indicator on every statusline refresh -- so
-  -- one such task must not turn into a repeating table.concat(nil) error.
+  -- The orchestrator and function strategies build tasks with no cmd at all,
+  -- which on the statusline path would be a table.concat(nil) on every redraw.
   return task.name or ''
 end
 
--- True when a project exrc has actually defined a run/build split. Without one
--- the two filters below match everything, which makes "core" and "other"
--- indistinguishable.
+-- Without one, the two filters below match everything and "core" and "other"
+-- are indistinguishable.
 function M.has_filters()
   return _G.filter_build_tasks ~= nil or _G.filter_run_tasks ~= nil
 end
@@ -36,8 +34,8 @@ function M.filter_run_tasks(task)
   return true
 end
 
--- Without a hook the formatter falls back to the command, which suits the
--- lualine indicator but not the task list, where overseer renders a name.
+-- Without a hook this falls back to the command, which suits the lualine
+-- indicator but not the task list, where overseer renders a name.
 function M.has_formatter()
   return _G.task_formatter ~= nil
 end
@@ -52,7 +50,7 @@ end
 local BUILD_CHARS = { '', '' }
 local RUN_CHARS = { '󰑮', '󰜎' }
 
--- Advances a two-frame spinner; returns the frame and the next index.
+-- Returns the frame and the next index.
 function M.spinner(index, kind)
   local chars = kind == 'run' and RUN_CHARS or BUILD_CHARS
   local next_index = (index % #chars) + 1

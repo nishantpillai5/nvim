@@ -3,15 +3,13 @@ vim.opt_local.commentstring = '<!-- %s -->'
 local notes = require('util.env').DIR_NOTES
 local in_notes = vim.fs.normalize(vim.fn.expand '%:p'):lower():find(vim.fs.normalize(notes):lower(), 1, true) ~= nil
 
--- Conceal markup only inside the notes directory, where it's prose to read
--- rather than source to edit.
+-- Only in the notes directory, which is prose to read rather than source.
 if in_notes then
   vim.opt_local.conceallevel = 1
 end
 
--- Notes keep worked hours as `09:00-17:00`, optionally with an explicit break
--- as `(b45)`. The virtual text is the span minus that break, 30 minutes when
--- none is written.
+-- Worked hours as `09:00-17:00`, with an optional `(b45)` break; the virtual
+-- text is the span minus that break, 30 minutes when none is written.
 if in_notes then
   local ns = vim.api.nvim_create_namespace 'markdown_time_diff'
 
@@ -30,8 +28,7 @@ if in_notes then
     end
   end
 
-  -- Buffer-local, and cleared first: an ftplugin runs again whenever the
-  -- filetype is re-set, which a `:edit` of the same file does.
+  -- Cleared first: an ftplugin runs again whenever the filetype is re-set.
   local group = vim.api.nvim_create_augroup('markdown_time_diff', { clear = false })
   vim.api.nvim_clear_autocmds { group = group, buffer = 0 }
   vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {

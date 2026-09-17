@@ -14,10 +14,7 @@ return {
         '<leader>Fe',
         function()
           local telescope = require 'telescope'
-          -- Load whatever is actually installed, then the aggregator. The old
-          -- config repeated this pcall block thirteen times, including for
-          -- plugins this config doesn't have (dap, project, git_worktree, rest,
-          -- yank_history, chezmoi).
+          -- Whatever is actually installed, then the aggregator.
           for module, extension in pairs {
             ['telescope._extensions.emoji'] = 'emoji',
             ['telescope._extensions.diff'] = 'diff',

@@ -1,10 +1,9 @@
--- <leader>zp toggles the in-buffer markdown rendering: render-markdown for the
--- text, snacks.image for images, equations and mermaid. Per buffer, on top of
--- both plugins' global `enabled = false`. <leader>zP is the browser preview.
+-- <leader>zp toggles in-buffer rendering per buffer, on top of both plugins'
+-- global `enabled = false`; <leader>zP is the browser preview.
 local M = {}
 
--- snacks.image has no detach, and its inline renderer redraws after any edit,
--- so only losing the buffer clears it -- at the cost of its marks and undo.
+-- snacks.image has no detach and redraws after any edit, so only losing the
+-- buffer clears it -- at the cost of its marks and undo.
 local function detach_images()
   local file = vim.api.nvim_buf_get_name(0)
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -15,8 +14,7 @@ end
 
 local function attach_images()
   local buf = vim.api.nvim_get_current_buf()
-  -- Both before the attach: doc.attach() returns early while enabled is false,
-  -- and setup() registers its FileType hook only while it is true.
+  -- Both before the attach: doc.attach() returns early while enabled is false.
   Snacks.image.config.enabled = true
   require('snacks.image').setup()
   -- snacks' "already attached" guard, which survives a :edit.

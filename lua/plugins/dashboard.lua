@@ -16,7 +16,6 @@ return {
         mru = { cwd_only = true, limit = 5 },
         shortcut = {
           { desc = ' Files', group = 'Label', action = 'Telescope find_files', key = 'f' },
-          -- Was `Neotree reveal focus`; this config uses oil.
           { desc = ' Explorer', group = 'Label', action = 'Oil', key = 'e' },
           {
             desc = ' Recent',

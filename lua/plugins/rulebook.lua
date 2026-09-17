@@ -1,6 +1,5 @@
--- Matches a diagnostic to its rule by `source` and `code`, so only diagnostics
--- carrying both are actionable -- the LSP client and nvim-lint both set them.
--- `setup` is optional and only needed to add sources, so there is no `opts`.
+-- Matches a diagnostic to its rule by `source` and `code`, which the LSP client
+-- and nvim-lint both set. `setup` only adds sources, so there is no `opts`.
 return {
   {
     'chrisgrieser/nvim-rulebook',

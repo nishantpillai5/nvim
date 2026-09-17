@@ -1,15 +1,10 @@
--- The treesitter parsers this config installs. A module rather than a local in
--- plugins/treesitter.lua so the Dockerfile's build step can install exactly this
--- list and block until it finishes, without repeating it:
+-- A module rather than a local in plugins/treesitter.lua, so the Dockerfile's
+-- build step can install exactly this list and block until it finishes:
 --
 --   nvim --headless '+lua require("nvim-treesitter").install(require("util.parsers")):wait(900000)' +qa
 --
--- json covers the jsonc filetype core/filetypes.lua sends .json files to --
--- `vim.treesitter.language.get_lang 'jsonc'` resolves to json, and there is no
--- separate jsonc parser to install.
---
--- latex is for rendering math, not editing .tex: it is the injected language
--- snacks.image looks for to find equations.
+-- json covers the jsonc filetype, which has no parser of its own; latex is the
+-- injected language snacks.image looks for to find equations.
 return {
   'bash',
   'c',

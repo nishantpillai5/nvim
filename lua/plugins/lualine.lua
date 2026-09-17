@@ -1,16 +1,11 @@
--- One lualine.setup call. The old config called it four times -- once here, then
--- again from lsp_zero.lua, lint.lua and noice.lua to graft components on. All
--- those components are defined inline below instead.
+-- One lualine.setup call; every grafted-on component is defined inline below.
 local ARRAY = { '｢', '｣' }
 
--- Buffers that shouldn't count as "unsaved work": they are modifiable but hold
--- nothing you'd lose.
+-- Modifiable, but holding nothing you'd lose.
 local EXCLUDED_FTS = { 'toggleterm', 'TelescopePrompt', 'oil' }
 
--- Windows that shouldn't take statusline focus. Without TelescopePrompt here the
--- global statusline follows focus into the picker and shows the prompt buffer
--- instead of the file you were in; the snacks_picker entries are the same case
--- for whatever vim.ui.select opens. Add 'trouble' if it lands.
+-- Without these the global statusline follows focus into a picker and shows
+-- its prompt buffer instead of the file you were in.
 local IGNORE_FTS = {
   'TelescopePrompt',
   'snacks_picker_list',
@@ -31,11 +26,8 @@ local LSP_ICONS = {
   jsonls = '',
 }
 
--- Four tabline components ask for this per redraw (the component itself, both
--- array_brackets and the `buffers` cond), and each sweep reads three options per
--- buffer. vim.uv.now() is the event loop's cached time, so it is stable within a
--- redraw and advances between them: keying the memo on it collapses the four
--- sweeps into one without ever serving a value from an earlier redraw.
+-- Four tabline components ask for this per redraw. vim.uv.now() is the loop's
+-- cached time -- stable within a redraw, advancing between -- so it keys a memo.
 local unsaved_alert_cache = { at = -1, value = '' }
 
 local function unsaved_buffer_alert()
@@ -66,9 +58,7 @@ local function cwd()
   return vim.uv.cwd()
 end
 
--- Directory of the current buffer, or nil for anything without a real path:
--- unnamed buffers and pseudo-paths like fugitive:// and oil://, none of which
--- resolve to a repo anyway.
+-- nil for pseudo-paths like fugitive:// and oil://, which resolve to no repo.
 local function buf_dir()
   local name = vim.api.nvim_buf_get_name(0)
   if name == '' or name:match '^%w+://' then
@@ -77,26 +67,21 @@ local function buf_dir()
   return vim.fs.dirname(name)
 end
 
--- Name of the linked git worktree, if the buffer is in one. Resolved from the
--- `.git` file rather than FugitiveGitDir(), which this config has no fugitive
--- for; util.git.dir_info caches, since this runs on every redraw.
+-- From the `.git` file rather than FugitiveGitDir(), which this config has no
+-- fugitive for. util.git.dir_info caches, since this runs on every redraw.
 local function worktree()
   local dir = buf_dir()
   local info = dir and require('util.git').dir_info(dir)
   return info and info.worktree and (' ' .. info.worktree) or ''
 end
 
--- Branch of the cwd's repository. lualine's own `branch` component resolves the
--- repo by walking up from the *buffer's* path, which resolves nothing for a
--- pseudo-path like `fugitive:///repo/.git//`: it then blanks the branch it had
--- cached, so the statusline loses the branch the moment a fugitive window opens.
--- This is the fallback for that.
+-- The fallback for lualine's own `branch`, which walks up from the *buffer's*
+-- path and blanks its cache on a pseudo-path like `fugitive:///repo/.git//`.
 local function cwd_branch()
   local info = require('util.git').dir_info(vim.uv.cwd())
   return info and info.branch or ''
 end
 
--- Attached LSP clients, as icons. Was lsp_zero.lua's lualine injection.
 local function lsp_clients()
   local clients = vim.lsp.get_clients { bufnr = 0 }
   if #clients == 0 then
@@ -114,7 +99,6 @@ local function loaded(mod)
   return package.loaded[mod] ~= nil
 end
 
--- Linters currently running. Was lint.lua's lualine injection.
 local function lint_progress()
   if not loaded 'lint' then
     return ''
@@ -136,8 +120,7 @@ local STATUS_SYMBOLS = {
 
 local spinner_build, spinner_run = 1, 1
 
--- Most recent build task, with a spinner while it runs. Was overseer.lua's own
--- lualine.setup call.
+-- Most recent build task, with a spinner while it runs.
 local function last_build_text()
   if not loaded 'overseer' then
     return ''
@@ -187,8 +170,8 @@ end
 
 local OVERSEER_ICONS = { FAILURE = '󰅚 ', CANCELED = ' ', SUCCESS = '󰄴 ', RUNNING = '󰑮 ' }
 
--- Replaces the `{ 'overseer' }` component: that one lives in overseer.nvim and
--- requires it at file scope, which loaded overseer -- and telescope -- on setup.
+-- Replaces the `{ 'overseer' }` component, which requires overseer -- and so
+-- telescope -- at file scope, on setup.
 local function overseer_counts()
   if not loaded 'overseer' then
     return ''
@@ -205,15 +188,14 @@ local function overseer_counts()
   return table.concat(pieces, ' ')
 end
 
--- Macro recording. lualine has no component for it, and the "recording @q"
--- message is a mode message that noice swallows.
+-- lualine has no component for it, and noice swallows the mode message.
 local function macro_recording()
   local reg = vim.fn.reg_recording()
   return reg ~= '' and ('󰑊 ' .. reg) or ''
 end
 
--- minuet's request progress, off its own User events. Its bundled component is
--- unused: requiring it in `opts` would load minuet at startup, not on InsertEnter.
+-- Off minuet's own User events: requiring its bundled component in `opts`
+-- would load minuet at startup rather than on InsertEnter.
 local minuet = { busy = false, total = 1, finished = 0, spinner = 1, round = nil, model = nil }
 
 local function minuet_track()
@@ -241,8 +223,7 @@ local function minuet_track()
     group = group,
     callback = function(ev)
       -- terminate_all_jobs() runs before the next round announces itself, so a
-      -- superseded job's Finished can land after the counters reset. Drop those:
-      -- the stamp is os.time(), so same-second rounds can still slip through.
+      -- superseded job's Finished can land after the counters reset.
       if minuet.round and (ev.data or {}).timestamp ~= minuet.round then
         return
       end
@@ -254,8 +235,8 @@ local function minuet_track()
   })
 end
 
--- Ask the server what it actually loaded. Retried only while unknown, so a down
--- server cannot spin curl on every redraw; a later swap needs an nvim restart.
+-- Retried only while unknown, so a down server cannot spin curl on every
+-- redraw; a later model swap needs an nvim restart.
 local function minuet_fetch_model(provider)
   if minuet.model or not provider or not provider.end_point then
     return
@@ -275,7 +256,6 @@ local function minuet_fetch_model(provider)
   end)
 end
 
--- Gated on minuet being loaded, so a disabled plugin shows nothing.
 local function minuet_model()
   if not loaded 'minuet' then
     return ''
@@ -287,7 +267,7 @@ local function minuet_model()
   if not model or model == '' then
     return ''
   end
-  -- Served names are often a full repo id; the basename is what fits a statusline.
+  -- Served names are often a full repo id; only the basename fits.
   model = model:match '[^/\\]+$' or model
   if not minuet.busy then
     return ' 󰚩 ' .. ARRAY[1] .. model .. ARRAY[2]
@@ -312,10 +292,8 @@ return {
         section_separators = { left = '', right = '' },
         component_separators = { left = '', right = '' },
         ignore_focus = IGNORE_FTS,
-        -- The defaults are repeated because this table is deep-extended onto
-        -- them by index, so a shorter list would leave their tail in place.
-        -- RecordingEnter/Leave are the additions; the refresh they queue runs a
-        -- tick later, by which point RecordingLeave's reg_recording() is clear.
+        -- Deep-extended onto the defaults by index, so they are repeated or
+        -- their tail stays in place. RecordingEnter/Leave are the additions.
         refresh = {
           events = {
             'WinEnter',
@@ -341,10 +319,8 @@ return {
         lualine_a = { 'mode', 'selectioncount' },
         lualine_b = { cwd },
         lualine_c = {
-          -- lualine's own component, with cwd_branch() covering the cases where
-          -- its per-buffer resolution comes up empty: fugitive:// and other
-          -- pseudo-path buffers, and the per-buffer cache misses that
-          -- ignore_focus causes in pickers, the dashboard and the quickfix list.
+          -- cwd_branch() covers where lualine's per-buffer resolution comes up
+          -- empty: pseudo-paths, and the cache misses ignore_focus causes.
           {
             'branch',
             fmt = function(name)
@@ -352,9 +328,7 @@ return {
             end,
           },
           worktree,
-          -- Was gitblame.lua's own lualine.setup call, gated on the dropped
-          -- SCREEN=='widescreen' knob. The cond keeps it out of the way when
-          -- there's no blame text.
+          -- The cond keeps it out of the way when there's no blame text.
           {
             function()
               return '' .. require('gitblame').get_current_blame_text()
@@ -395,7 +369,7 @@ return {
             icons_enabled = false,
             show_modified_status = false,
             symbols = { modified = '', alternate_file = '', directory = '' },
-            -- Only name the modified buffers; the rest collapse to nothing.
+            -- Only name the modified buffers.
             fmt = function(name, context)
               return vim.bo[context.bufnr].modified and name or ''
             end,
@@ -418,8 +392,8 @@ return {
           task_status,
           overseer_counts,
           {
-            -- NoiceStatus declares its ---@class on a `return` statement, so
-            -- lua_ls registers the class name but none of its fields.
+            -- NoiceStatus declares its ---@class on a `return`, so lua_ls
+            -- registers the class name but none of its fields.
             function()
               ---@diagnostic disable-next-line: undefined-field
               return require('noice').api.status.command.get()
@@ -440,23 +414,19 @@ return {
               return loaded 'neoscopes'
             end,
           },
-          -- Whisper: the pulse, then the buffer transcribed words are landing
-          -- in, while any are. The mic that goes with it is the component after
-          -- the backend label below. See util/whisper.lua.
+          -- The pulse, and the buffer transcribed words are landing in. Its
+          -- mic is the component after the backend label below.
           {
             function()
               return require('util.whisper').status()
             end,
           },
-          -- The AI backend <leader>a sends to (cycled with <leader>ab), then the
-          -- dictation mic: together they say where a dictated prompt would land,
-          -- so they are one component rather than two adjacent ones. lualine pads
-          -- every non-empty component on both sides, which would read as two
-          -- spaces between them. See util/ai/init.lua and util/whisper.lua.
+          -- Backend label plus dictation mic, as one component: lualine pads
+          -- every non-empty component, so two would read as a double space.
           {
             function()
               local parts = { require('util.ai').status() }
-              -- Empty whenever whisper isn't in the config -- no trailing space.
+              -- Empty without whisper, so there is no trailing space.
               local mic = require('util.whisper').mic()
               if mic ~= '' then
                 parts[#parts + 1] = mic

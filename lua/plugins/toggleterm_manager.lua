@@ -1,6 +1,5 @@
--- `_G.env_reader` is also used by the custom.vscode_env overseer component, so a
--- task and a terminal see the same environment. A project-local exrc file can
--- replace it.
+-- `_G.env_reader` is also read by the custom.vscode_env overseer component, so a
+-- task and a terminal see the same environment. A project exrc can replace it.
 _G.env_reader = _G.env_reader
   or function()
     local cwd = vim.uv.cwd()

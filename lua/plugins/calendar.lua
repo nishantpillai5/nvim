@@ -6,15 +6,13 @@ local function note_path(day, month, year)
   return vim.fs.joinpath(journal, string.format('%04d.%02d.%02d.md', year, month, day))
 end
 
--- calendar-vim calls these through `v:lua.<name>`, so they have to be globals
--- rather than module functions.
+-- Called through `v:lua.<name>`, so they have to be globals.
 function _G.notes_cal_sign(day, month, year)
   return vim.fn.filereadable(note_path(day, month, year)) == 1 and 1 or 0
 end
 
 function _G.notes_cal_action(day, month, year)
-  -- Back to the window the calendar was opened from, so the note replaces the
-  -- note rather than the calendar.
+  -- Back to the window it was opened from, so the note replaces the note.
   vim.cmd 'silent! wincmd p'
   vim.cmd('silent! e ' .. vim.fn.fnameescape(note_path(day, month, year)))
 end
@@ -43,8 +41,7 @@ return {
         pattern = journal .. '/*.md',
         desc = 'show the journal month alongside a journal note',
         callback = function()
-          -- Only with the vault as cwd; a journal note opened from elsewhere
-          -- should not steal a window.
+          -- Only with the vault as cwd, or it steals a window.
           if vim.fs.normalize(vim.uv.cwd() or '') ~= vim.fs.normalize(env.DIR_NOTES) then
             return
           end

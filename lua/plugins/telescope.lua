@@ -3,8 +3,7 @@ local git = require 'util.git'
 local util = require 'util'
 local pick = require 'util.pick'
 
--- Grepping a static file list passes every path on the command line, so it has
--- to be capped.
+-- A static file list is passed on the command line, so it has to be capped.
 local MAX_GREPPED_FILES = 500
 
 local CONTENT_RIPGREP = {
@@ -59,14 +58,12 @@ end
 local function live_grep_changed(opts)
   opts = opts or {}
   opts.prompt_title = 'Live Grep Changed Files from HEAD'
-  -- `git status --porcelain -u` prefixes a fixed-width status code ("XY "), so
-  -- strip exactly that. Matching the last whitespace-delimited token instead
-  -- truncated any path containing a space to its final component.
+  -- Exactly the fixed-width "XY " status code: matching the last token instead
+  -- truncated any path containing a space.
   local files = {}
   for _, line in ipairs(git_file_list { 'status', '--porcelain', '-u' }) do
     local path = line:sub(4)
-    -- Git quotes paths with unusual characters (core.quotePath); the C-style
-    -- escapes that matter here are \" and \\.
+    -- core.quotePath; the C-style escapes that matter here are \" and \\.
     if path:sub(1, 1) == '"' then
       path = path:sub(2, -2):gsub('\\(.)', '%1')
     end
@@ -112,11 +109,8 @@ end
 
 ------------------------------------------------------------ changed files ----
 
--- git_file_list runs git from the repo root, so its paths are root-relative --
--- anchor them there and not at nvim's cwd, which differs the moment you are in
--- a subdirectory. `root` is captured once per picker rather than re-resolved:
--- both this and the previewer run with telescope's prompt buffer current, where
--- util.root_dir() would answer for that buffer instead of the real one.
+-- git_file_list's paths are root-relative, not cwd-relative. `root` is captured
+-- once: this runs with telescope's prompt buffer current, not the real one.
 local function entry_maker_for(root)
   return function(entry)
     return {
@@ -128,10 +122,8 @@ local function entry_maker_for(root)
   end
 end
 
--- delta makes the diff readable, but it's an external binary; fall back to
--- git's own output when it isn't installed.
--- `-C` for the same reason as entry_maker_for: the termopen previewer inherits
--- nvim's cwd, but `value` is relative to the repo root.
+-- delta is an external binary, so fall back to git's own output. `-C` for the
+-- same reason as entry_maker_for: `value` is relative to the repo root.
 local function diff_command(ref, value, root)
   local cmd = { 'git', '-C', root }
   if vim.fn.executable 'delta' == 1 then
@@ -150,16 +142,14 @@ local function changed_files_from(ref, include_untracked)
   local previewers = require 'telescope.previewers'
   local sorters = require 'telescope.sorters'
 
-  -- Resolved from the buffer you invoked the picker from, then reused
-  -- throughout: see entry_maker_for.
+  -- From the buffer you invoked the picker from; see entry_maker_for.
   local root = util.root_dir()
   local entry_maker = entry_maker_for(root)
 
   local diff_args = { 'diff', '--name-only', '--diff-filter=ACMR', '--relative', ref }
   local untracked_args = { 'ls-files', '--others', '--exclude-standard' }
 
-  -- `with_untracked` overrides the picker's own setting, for the <C-i> mapping
-  -- below that pulls untracked files into an already-open picker.
+  -- `with_untracked` overrides the picker's own setting, for <C-i> below.
   local function results(with_untracked)
     if with_untracked == nil then
       with_untracked = include_untracked
@@ -215,7 +205,7 @@ local function reset_file_to(ref)
     vim.notify('No file to reset', vim.log.levels.WARN)
     return
   end
-  -- Was `:Git checkout` via fugitive, which this config doesn't have.
+
   git.run({ 'checkout', ref, '--', file }, 'Reset ' .. vim.fn.fnamemodify(file, ':t') .. ' to ' .. ref)
 end
 
@@ -476,8 +466,7 @@ return {
       local action_layout = require 'telescope.actions.layout'
       local lga_actions = require 'telescope-live-grep-args.actions'
 
-      -- Bound as `y` in every picker, so it cannot assume entry.value is a
-      -- string: builtins like `commands` (<leader>:) put a table there.
+      -- Bound as `y` everywhere, so entry.value may be a table: `commands` is.
       local function yank_name(prompt_bufnr)
         local entry = require('telescope.actions.state').get_selected_entry()
         local name = entry and entry.value
@@ -496,8 +485,7 @@ return {
         actions.close(prompt_bufnr)
       end
 
-      -- T replaces trouble's list with these results, t adds to it. Reached
-      -- again with <leader>tf, which opens trouble's `telescope` mode.
+      -- T replaces trouble's list with these results, t adds to it.
       local open_with_trouble = function(opts)
         require('trouble.sources.telescope').open(opts)
       end

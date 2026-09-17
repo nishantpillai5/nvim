@@ -1,8 +1,5 @@
--- The five `(Trouble)` slots in plugins/edgy.lua dock these by mode -- diagnostics
--- and the qf/loclist lists at the bottom, lsp and telescope on the right -- so no
--- window options are set here. Two deliberate departures from the old config:
--- `auto_refresh` keeps its default, so a list follows the fixes rather than going
--- stale, and references moved off `gr` because 0.11 owns the `gr*` prefix.
+-- The `(Trouble)` slots in plugins/edgy.lua dock these by mode, so no window
+-- options are set here. References are off `gr`, which 0.11 owns.
 return {
   {
     'folke/trouble.nvim',
@@ -18,11 +15,9 @@ return {
       { '<leader>tr', '<cmd>Trouble lsp_references toggle<cr>', desc = 'references' },
       -- Populated by the T / t mappings in plugins/telescope.lua.
       { '<leader>tf', '<cmd>Trouble telescope toggle<cr>', desc = 'finder' },
-      -- Not trouble's own list: gitsigns fills the loclist, the autocmd below
-      -- turns it into one.
+      -- gitsigns fills the loclist; the autocmd below turns it into one.
       { '<leader>tg', '<cmd>Gitsigns setloclist<cr>', desc = 'git' },
-      -- `:TodoTrouble` is todo-comments' own command (its plugin/todo.vim), and
-      -- the fork ships the `todo` source trouble reads.
+      -- `:TodoTrouble` is todo-comments' own, and the fork ships this source.
       { '<leader>tT', '<cmd>TodoTrouble<cr>', desc = 'todos' },
       {
         '<M-j>',
@@ -41,17 +36,15 @@ return {
     },
     opts = {},
     init = function()
-      -- Quickfix and location lists open as trouble instead. This has to be
-      -- registered up front rather than in `config`, or the first :copen of a
-      -- session would beat the plugin to it -- the `Trouble` command in the
-      -- callback is what loads it.
+      -- Registered up front rather than in `config`, or the session's first
+      -- :copen beats the plugin to it; the `Trouble` command below loads it.
       vim.api.nvim_create_autocmd('BufRead', {
         group = vim.api.nvim_create_augroup('trouble_list_takeover', { clear = true }),
         callback = function(ev)
           if vim.bo[ev.buf].buftype ~= 'quickfix' then
             return
           end
-          -- A loclist window has a file window behind it; the quickfix one does not.
+          -- A loclist window has a file window behind it; a quickfix one does not.
           local is_loclist = vim.fn.getloclist(0, { filewinid = 1 }).filewinid ~= 0
           vim.schedule(function()
             if is_loclist then

@@ -1,12 +1,7 @@
--- Debugging. nvim-dap only speaks the Debug Adapter Protocol; the adapters
--- themselves are separate binaries, installed through Mason -- see
--- MASON_PACKAGES in core/lsp.lua.
---
--- The F-key row mirrors VSCode: F4 step over, F5 continue/start, F6 step into,
--- F8 step out, F9 pause, C-F5 stop.
+-- nvim-dap speaks only the protocol; the adapters are Mason binaries, listed in
+-- MASON_PACKAGES. The F-key row mirrors VSCode.
 
--- Steps that announce themselves, the way the old config did -- without a
--- notification there is no feedback when the step lands off-screen.
+-- Announced, or a step landing off-screen gives no feedback at all.
 local function step(fn, label)
   return function()
     vim.notify('DAP: ' .. label)
@@ -14,8 +9,8 @@ local function step(fn, label)
   end
 end
 
--- Telescope's dap pickers. telescope-dap is loaded by hand because lazy's module
--- hook reads `telescope._extensions.dap` as telescope.nvim's, not its own.
+-- Loaded by hand: lazy's module hook reads `telescope._extensions.dap` as
+-- telescope.nvim's rather than telescope-dap's.
 local function picker(name)
   return function()
     require('lazy').load { plugins = { 'telescope-dap.nvim' } }
@@ -24,9 +19,8 @@ local function picker(name)
   end
 end
 
--- overseer decodes launch.json (dap's own decoder rejects the comments VSCode
--- allows) and runs preLaunchTask. Wired on first launch, not in `config`, which
--- runs on every file open -- persistent-breakpoints loads dap at BufReadPre.
+-- overseer decodes launch.json, which dap's own decoder rejects for its
+-- comments, and runs preLaunchTask. On first launch, not on every file open.
 local overseer_wired = false
 local function wire_overseer()
   if overseer_wired then
@@ -34,7 +28,7 @@ local function wire_overseer()
   end
   overseer_wired = true
   require('dap.ext.vscode').json_decode = require('overseer.json').decode
-  -- overseer's own opts set `dap = false`, so it is patched on here instead.
+  -- overseer's own opts set `dap = false`, so it is patched on here.
   require('overseer').enable_dap(true)
 end
 
@@ -45,7 +39,7 @@ end
 return {
   {
     'mfussenegger/nvim-dap',
-    -- Only what `config` calls. telescope-dap and overseer are loaded on demand.
+    -- Only what `config` calls; the rest is loaded on demand.
     dependencies = {
       'ofirgall/goto-breakpoints.nvim',
       'theHamsta/nvim-dap-virtual-text',
@@ -107,8 +101,7 @@ return {
       vim.fn.sign_define('DapLogPoint', { text = '󰰍', texthl = '@error' })
       vim.fn.sign_define('DapBreakpointCondition', { text = '', texthl = '@error' })
 
-      -- C/C++ through cpptools. The binary carries the .exe suffix on Windows
-      -- only; Mason puts it on Neovim's PATH either way.
+      -- The .exe suffix is Windows-only; Mason puts it on PATH either way.
       dap.adapters.cppdbg = {
         id = 'cppdbg',
         type = 'executable',
@@ -117,7 +110,7 @@ return {
       }
     end,
   },
-  -- Standalone, not a dependency: dap loads on every file open and would bring
-  -- telescope with it. picker() above loads this instead.
+  -- Standalone, not a dependency: dap loads on every file open and would drag
+  -- telescope in. picker() above loads this instead.
   { 'nvim-telescope/telescope-dap.nvim', lazy = true },
 }

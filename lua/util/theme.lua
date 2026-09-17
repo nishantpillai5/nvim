@@ -1,8 +1,7 @@
 local M = {}
 
--- Tints the window separator by current mode. Called from the ModeChanged
--- autocmd in plugins/colorscheme.lua and by colorful-winsep on load.
--- `vscode.colors` is required lazily so this module stays safe to load early.
+-- Called from the ModeChanged autocmd in plugins/colorscheme.lua and by
+-- colorful-winsep. `vscode.colors` is lazy, so this is safe to load early.
 function M.highlight_separator(mode)
   local c = require('vscode.colors').get_colors()
 

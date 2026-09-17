@@ -1,6 +1,6 @@
 local M = {}
 
--- Repo root for nvim's cwd, which is where every command below runs.
+-- Where every command below runs.
 local function cwd_root()
   local cwd = vim.uv.cwd()
   if not cwd then
@@ -10,9 +10,8 @@ local function cwd_root()
   return (info and info.root) or cwd
 end
 
--- Run git and report failure rather than letting it pass silently, then let open
--- buffers notice what changed on disk. argv, so nothing goes through a shell and
--- no argument needs quoting.
+-- Reports failure rather than letting it pass, then lets open buffers notice
+-- what changed on disk. argv, so nothing needs quoting.
 function M.run(args, ok_msg)
   local cmd = vim.list_extend({ 'git' }, args)
   local res = vim.system(cmd, { text = true, cwd = cwd_root() }):wait()
@@ -28,15 +27,12 @@ function M.run(args, ok_msg)
   return false
 end
 
--- Keyed by repo root: one nvim session moves between repos, and `main` for one is
--- wrong for another. Only *successful* lookups are cached -- the old code cached
--- the 'main' fallback too, so a single call made outside a repo (or before
--- origin/HEAD existed) pinned 'main' for the rest of the session.
+-- Keyed by repo root, since one session moves between repos. Only *successful*
+-- lookups are cached, or a call made outside a repo pins the fallback.
 local cached_main = {}
 
--- Default branch of `origin`, e.g. "main". The old config piped rev-parse
--- through sed and returned vim.fn.system's output verbatim, keeping the trailing
--- newline -- git then rejected the ref with "ambiguous argument 'main\n'".
+-- Default branch of `origin`, e.g. "main". Trimmed: git rejects a ref with a
+-- trailing newline as "ambiguous argument 'main\n'".
 function M.main_branch()
   local root = cwd_root()
   if cached_main[root] then
@@ -52,11 +48,11 @@ function M.main_branch()
     end
   end
 
-  -- Not cached: origin/HEAD may just not be set up in this repo yet.
+  -- Not cached: origin/HEAD may just not be set up yet.
   return 'main'
 end
 
--- Current branch name, or nil on a detached HEAD or outside a repo.
+-- nil on a detached HEAD or outside a repo.
 function M.branch()
   local res = vim.system({ 'git', 'symbolic-ref', '--short', 'HEAD' }, { text = true }):wait()
   if res.code ~= 0 then
@@ -66,9 +62,8 @@ function M.branch()
   return out ~= '' and out or nil
 end
 
--- Callers splice these refs straight into a command string, where a nil is an
--- E5108 rather than a message -- so offer reporting variants and let the caller
--- bail on nil.
+-- Callers splice these refs into a command string, where a nil is an E5108
+-- rather than a message -- so the reporting variants below exist.
 local function report(base, kind, branch)
   if not base then
     vim.notify(('No %s with %s'):format(kind, branch), vim.log.levels.ERROR)
@@ -86,9 +81,7 @@ function M.merge_base(branch)
   return out ~= '' and out or nil
 end
 
--- `--fork-point` needs reflog data and fails outright on shallow or fresh
--- clones, so fall back to the plain merge base rather than returning git's
--- error text as if it were a ref.
+-- `--fork-point` needs reflog data and fails on shallow or fresh clones.
 function M.fork_point(branch)
   branch = (branch and branch ~= '') and branch or M.main_branch()
   local res = vim.system({ 'git', 'merge-base', '--fork-point', branch, 'HEAD' }, { text = true }):wait()
@@ -101,11 +94,8 @@ function M.fork_point(branch)
   return M.merge_base(branch)
 end
 
--- Every working tree of the repo containing `dir`, git's order (primary first),
--- as `{ path, branch?, bare?, detached?, locked? }`; `locked` is git's reason
--- string, or true when it was locked without one. nil outside a repo.
--- `--porcelain` because plain `worktree list` separates its columns with
--- whitespace, truncating any path that contains a space.
+-- `{ path, branch?, bare?, detached?, locked? }` in git's order, primary first.
+-- `--porcelain`: plain `worktree list` truncates a path containing a space.
 function M.worktrees(dir)
   local res = vim.system({ 'git', '-C', dir, 'worktree', 'list', '--porcelain' }, { text = true }):wait()
   if res.code ~= 0 then
@@ -139,17 +129,13 @@ function M.worktrees(dir)
   return records
 end
 
--- Statusline-safe repo facts, read off disk rather than shelled out, and cached
--- because these run on every redraw -- many times a second. The TTL is the whole
--- invalidation story on purpose: a branch can change from outside nvim, so no
--- set of autocmds is authoritative, and a second of staleness on a statusline
--- costs nothing.
+-- Statusline-safe repo facts, cached because these run on every redraw. A TTL
+-- is the whole story: a branch can change from outside nvim.
 local DIR_TTL_MS = 1000
 local dir_cache = {}
 
--- First line of a file, or nil. Deliberately not vim.fn.readfile, which raises
--- E484 on an unreadable path -- inside a statusline component that means the
--- error repeats on every redraw.
+-- Not vim.fn.readfile, which raises E484 on an unreadable path -- inside a
+-- statusline component that repeats on every redraw.
 local function read_first_line(path)
   local fd = vim.uv.fs_open(path, 'r', 438)
   if not fd then
@@ -171,8 +157,7 @@ local function resolve_dir(dir)
   local gitdir, worktree = dotgit, nil
   local stat = vim.uv.fs_stat(dotgit)
   if stat and stat.type == 'file' then
-    -- Linked worktree or submodule: `.git` is a file pointing at the real git
-    -- dir, e.g. `gitdir: /repo/.git/worktrees/NAME`.
+    -- Linked worktree or submodule: `.git` is a file pointing at the real dir.
     local target = (read_first_line(dotgit) or ''):match 'gitdir: (.+)$'
     if target then
       gitdir = vim.fs.normalize(vim.startswith(target, '/') and target or vim.fs.joinpath(root, target))
@@ -185,15 +170,14 @@ local function resolve_dir(dir)
   local branch
   if gitdir then
     local head = read_first_line(vim.fs.joinpath(gitdir, 'HEAD')) or ''
-    -- Detached HEAD falls back to a short sha, the same width lualine uses.
+    -- Detached HEAD falls back to a short sha, lualine's width.
     branch = head:match 'ref: refs/heads/(.+)$' or (head ~= '' and head:sub(1, 6) or nil)
   end
 
   return { root = root, gitdir = gitdir, worktree = worktree, branch = branch }
 end
 
--- Repo facts for `dir`: working-tree root, real git dir, linked-worktree name,
--- and branch (or short sha when detached). nil when `dir` is not in a repo.
+-- { root, gitdir, worktree, branch }, or nil when `dir` is not in a repo.
 function M.dir_info(dir)
   if not dir then
     return nil
