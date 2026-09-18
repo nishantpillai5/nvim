@@ -6,10 +6,17 @@ local M = {}
 -- buffer clears it -- at the cost of its marks and undo.
 local function detach_images()
   local file = vim.api.nvim_buf_get_name(0)
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  vim.cmd.bwipeout()
+  local win = vim.api.nvim_get_current_win()
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local old = vim.api.nvim_get_current_buf()
+  -- Park the window on a scratch first: wiping a buffer closes every window
+  -- showing it, and the :edit below would then evict a split's other file.
+  local scratch = vim.api.nvim_create_buf(false, true)
+  vim.bo[scratch].bufhidden = 'wipe'
+  vim.api.nvim_win_set_buf(win, scratch)
+  vim.api.nvim_buf_delete(old, { force = true })
   vim.cmd.edit(vim.fn.fnameescape(file))
-  pcall(vim.api.nvim_win_set_cursor, 0, cursor)
+  pcall(vim.api.nvim_win_set_cursor, win, cursor)
 end
 
 local function attach_images()
@@ -35,11 +42,18 @@ function M.toggle()
   require('render-markdown.api').set_buf(on)
 
   if on then
+    -- Window-local so it survives the buffer wipe in detach_images().
+    vim.w.md_wrap = vim.wo.wrap
+    vim.wo.wrap = true
     attach_images()
     vim.b[buf].md_render = true
   else
     Snacks.image.config.enabled = false
     detach_images()
+    if vim.w.md_wrap ~= nil then
+      vim.wo.wrap = vim.w.md_wrap
+      vim.w.md_wrap = nil
+    end
   end
 end
 
