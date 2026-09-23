@@ -339,10 +339,17 @@ return {
           },
         },
         lualine_x = {
-          minuet_model,
           lint_progress,
           { 'diagnostics', always_visible = false },
           lsp_clients,
+          minuet_model,
+          -- The plan limits claude.ai shows; util.claude_usage refetches them on a
+          -- timer of its own, so a redraw only reads what is already there.
+          {
+            function()
+              return require('util.claude_usage').status()
+            end,
+          },
         },
         lualine_y = {
           'encoding',

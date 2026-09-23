@@ -5,18 +5,26 @@ local M = {}
 -- snacks.image has no detach and redraws after any edit, so only losing the
 -- buffer clears it -- at the cost of its marks and undo.
 local function detach_images()
-  local file = vim.api.nvim_buf_get_name(0)
-  local win = vim.api.nvim_get_current_win()
-  local cursor = vim.api.nvim_win_get_cursor(win)
   local old = vim.api.nvim_get_current_buf()
-  -- Park the window on a scratch first: wiping a buffer closes every window
-  -- showing it, and the :edit below would then evict a split's other file.
-  local scratch = vim.api.nvim_create_buf(false, true)
-  vim.bo[scratch].bufhidden = 'wipe'
-  vim.api.nvim_win_set_buf(win, scratch)
+  local file = vim.api.nvim_buf_get_name(old)
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  -- A placeholder keeps the windows open: a bare wipe closes them, and :edit
+  -- then lands in whatever window is left (e.g. a terminal split).
+  local tmp = vim.api.nvim_create_buf(false, true)
+  vim.bo[tmp].bufhidden = 'wipe'
+  local wins = vim.fn.win_findbuf(old)
+  for _, win in ipairs(wins) do
+    vim.api.nvim_win_set_buf(win, tmp)
+  end
   vim.api.nvim_buf_delete(old, { force = true })
   vim.cmd.edit(vim.fn.fnameescape(file))
-  pcall(vim.api.nvim_win_set_cursor, win, cursor)
+  local new = vim.api.nvim_get_current_buf()
+  for _, win in ipairs(wins) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_set_buf(win, new)
+    end
+  end
+  pcall(vim.api.nvim_win_set_cursor, 0, cursor)
 end
 
 local function attach_images()
@@ -42,18 +50,14 @@ function M.toggle()
   require('render-markdown.api').set_buf(on)
 
   if on then
-    -- Window-local so it survives the buffer wipe in detach_images().
-    vim.w.md_wrap = vim.wo.wrap
-    vim.wo.wrap = true
     attach_images()
     vim.b[buf].md_render = true
+    -- Local to this buffer in this window; the reload on toggle-off drops it.
+    vim.wo[0][0].wrap = true
+    vim.wo[0][0].linebreak = true
   else
     Snacks.image.config.enabled = false
     detach_images()
-    if vim.w.md_wrap ~= nil then
-      vim.wo.wrap = vim.w.md_wrap
-      vim.w.md_wrap = nil
-    end
   end
 end
 
