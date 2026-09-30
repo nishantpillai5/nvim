@@ -967,7 +967,10 @@ local function input_box_text()
   end
   -- Drop the prompt marker, right-trim each line's box padding, trim the block.
   content[1] = content[1]:gsub('^%s*', ''):gsub('^\u{276f}%s?', ''):gsub('^>%s?', '')
+  -- Claude shows the IDE context in the box, e.g. "[⧉ In tasks.json]" or "⧉ 3 lines selected".
   for i, l in ipairs(content) do
+    l = l:gsub('%[?\u{29c9} In [^%]]-%]%s*', ''):gsub('%[?\u{29c9} In %S+%s*', '')
+    l = l:gsub('%[?\u{29c9} %d+ lines? selected%]?%s*', '')
     content[i] = (l:gsub('%s+$', ''))
   end
   -- The empty box is padded with U+00A0, which Lua's %s does not match.
