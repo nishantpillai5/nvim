@@ -5,7 +5,6 @@ local panel = require('util.ai.panel').panel {
   id = 99, -- toggleterm slot, well clear of the numbered terminals <leader>o
   name = 'omp',
   exe = 'omp',
-  width = 0.45, -- share of the columns the panel takes, matching the Claude panel
 }
 
 -- Registered at file-body level, which core/lazy.lua runs while collecting
@@ -16,7 +15,6 @@ require('util.ai').register('omp', {
   show = panel.show,
   submit = panel.submit,
   find_session = panel.find_session,
-  find_session_cli = panel.find_session_cli,
   health = function()
     vim.cmd 'checkhealth omp'
   end,

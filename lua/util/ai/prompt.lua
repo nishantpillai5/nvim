@@ -142,6 +142,42 @@ local function attach_completion(buf)
   })
 end
 
+-- What an <Esc> left behind: { text, backend, typed }, where `typed` means it
+-- also sits in that backend's input. Kept when the backend refused it, so the
+-- box still reopens with it.
+local staged = nil
+
+-- For whatever else takes the text out of the agent's input (send now, a
+-- submit or chat:cancel in the terminal), or the backspaces eat newer typing.
+function M.forget_staged()
+  if staged then
+    staged.typed = false
+  end
+end
+
+-- Waits for its backend's return, so another backend's input is never touched.
+local function reclaim_staged()
+  if not staged or staged.backend ~= ai.get().name then
+    return nil
+  end
+  local draft = staged
+  staged = nil
+  if draft.typed then
+    ai.try('unstage', draft.text)
+  end
+  return draft.text
+end
+
+-- Typing straight into the agent's terminal takes the input over.
+vim.api.nvim_create_autocmd('TermEnter', {
+  group = vim.api.nvim_create_augroup('ai_prompt_staged', { clear = true }),
+  callback = function(ev)
+    if ai.is_agent_terminal(ev.buf) then
+      M.forget_staged()
+    end
+  end,
+})
+
 local ghost_ns = vim.api.nvim_create_namespace 'ai_prompt_ghost'
 local context_ns = vim.api.nvim_create_namespace 'ai_prompt_context'
 
@@ -184,11 +220,14 @@ local function open_prompt_input()
   vim.bo[buf].bufhidden = 'wipe'
   vim.b[buf].ai_prompt = true
   local suggestion = ai.try 'scrape_suggestion'
-  local prefill
+  local prefill = reclaim_staged()
+  if prefill then
+    suggestion = nil -- the scrape just read the draft back
+  end
   if vsel then
     local mention = ai.try('mention', origin_buf, vsel)
     if mention then
-      prefill = mention .. ' '
+      prefill = (prefill and prefill .. ' ' or '') .. mention .. ' '
       suggestion = nil -- the prefill replaces the suggested-reply ghost
     end
   end
@@ -325,6 +364,9 @@ local function open_prompt_input()
     end
 
     closed = true
+    if not send and text:gsub('%s', '') ~= '' then
+      staged = { text = text, backend = ai.get().name, typed = ai.try('stage', text) == true }
+    end
     clear_origin_highlight()
     restore_pumheight()
     if vim.api.nvim_win_is_valid(win) then
@@ -403,13 +445,14 @@ local function open_prompt_input()
     end
   end, { buffer = buf })
 
-  if prefill then
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { prefill })
+  local prefill_lines = prefill and vim.split(prefill, '\n')
+  if prefill_lines then
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, prefill_lines)
     fit_height()
   end
   vim.cmd 'startinsert'
-  if prefill then
-    vim.api.nvim_win_set_cursor(win, { 1, #prefill })
+  if prefill_lines then
+    vim.api.nvim_win_set_cursor(win, { #prefill_lines, #prefill_lines[#prefill_lines] })
   end
   render_ghost()
 

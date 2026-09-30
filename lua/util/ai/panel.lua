@@ -5,12 +5,12 @@ local M = {}
 
 local ESC_TIMEOUT = 200 -- ms in which a second <Esc> means "leave terminal mode", not "another escape"
 
----@param opts { id: number, name: string, exe: string, width: number }
+---@param opts { id: number, name: string, exe: string }
 function M.panel(opts)
   local term = nil
 
   local function size()
-    return math.floor(vim.o.columns * opts.width)
+    return math.floor(vim.o.columns * require('util.ai').PANEL_WIDTH)
   end
 
   local esc_timer = nil
@@ -175,11 +175,8 @@ function M.panel(opts)
     submit = function(text)
       return send_raw((text:gsub('%s*\r?\n%s*', ' ')) .. '\r')
     end,
-    -- No nvim-side picker, so both session keys open the TUI's own.
+    -- No nvim-side picker, so this opens the TUI's own.
     find_session = function()
-      start('--resume', true)
-    end,
-    find_session_cli = function()
       start('--resume', true)
     end,
     toggle = toggle,

@@ -172,6 +172,7 @@ end
 -- Defined lower in the file.
 local show_no_focus
 local launch_claude
+local any_claude_terminal
 local ensure_terminal_autoscroll
 
 -- Where the *next* Claude process starts; read once by cwd_provider below.
@@ -539,10 +540,209 @@ local function pick_claude_session(opts)
         end
         map('i', '<CR>', resume_session)
         map('n', '<CR>', resume_session)
+        -- Claude's own --resume picker, for what this one cannot show.
+        if not run_cwd then
+          local function tui_picker()
+            actions.close(prompt_bufnr)
+            show_no_focus '--resume'
+          end
+          map('i', '<C-t>', tui_picker)
+          map('n', '<C-t>', tui_picker)
+        end
         return true
       end,
     })
     :find()
+end
+
+-- The list `claude --teleport` shows, read the way Claude reads it: the
+-- claude.ai OAuth token from the login keychain against /v1/code/sessions.
+local CLOUD_SESSIONS_URL = 'https://api.anthropic.com/v1/code/sessions'
+
+-- "2026-09-28T10:11:12.345Z" is UTC; os.time reads a table as local time.
+local function utc_epoch(iso)
+  local y, mo, d, h, mi, s = (iso or ''):match '^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)'
+  if not y then
+    return 0
+  end
+  local now = os.time()
+  local offset = now - os.time(os.date('!*t', now) --[[@as osdateparam]])
+  return os.time { year = y, month = mo, day = d, hour = h, min = mi, sec = s, isdst = false } + offset
+end
+
+-- Lowercased: GitHub treats owner/repo case-insensitively.
+local function repo_slug(url)
+  local slug = type(url) == 'string' and (url:gsub('%.git$', '')):match '[:/]([^/:]+/[^/]+)$'
+  return slug and slug:lower() or nil
+end
+
+-- vim.system throws, rather than failing the callback, on a missing binary.
+-- No vim.fn.executable: this also runs from inside vim.system callbacks.
+local function run_async(cmd, opts, cb)
+  return (pcall(vim.system, cmd, opts, cb))
+end
+
+-- macOS keeps it in the login keychain, Linux in ~/.claude/.credentials.json.
+local function read_credentials(cb)
+  if run_async({ 'security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w' }, { text = true }, function(res)
+    cb(res.stdout)
+  end) then
+    return
+  end
+  local f = io.open(vim.fn.expand '~/.claude/.credentials.json', 'r')
+  local raw = f and f:read '*a'
+  if f then
+    f:close()
+  end
+  cb(raw)
+end
+
+local function fetch_cloud_sessions(cb)
+  local function fail(msg)
+    vim.schedule(function()
+      cb(nil, msg)
+    end)
+  end
+  read_credentials(function(raw)
+    local ok, creds = pcall(vim.json.decode, raw or '')
+    local oauth = ok and json_field(creds, 'claudeAiOauth')
+    local token = json_field(oauth, 'accessToken')
+    if type(token) ~= 'string' then
+      return fail 'no claude.ai login found'
+    end
+    -- Refreshing is Claude's job; any running session renews it.
+    local expires = json_field(oauth, 'expiresAt')
+    if type(expires) == 'number' and expires / 1000 < os.time() then
+      return fail 'claude.ai token expired'
+    end
+    -- Headers over stdin keep the token out of `ps`.
+    local headers = table.concat({
+      'Authorization: Bearer ' .. token,
+      'anthropic-version: 2023-06-01',
+      'anthropic-client-platform: claude_code',
+    }, '\n')
+    local started = run_async(
+      { 'curl', '-sf', '--max-time', '10', '-H', '@-', CLOUD_SESSIONS_URL },
+      { text = true, stdin = headers },
+      function(res)
+        local decoded_ok, decoded = pcall(vim.json.decode, res.stdout or '')
+        local data = decoded_ok and json_field(decoded, 'data')
+        if res.code ~= 0 or type(data) ~= 'table' then
+          return fail('session list request failed (curl exit ' .. res.code .. ')')
+        end
+        vim.schedule(function()
+          cb(data)
+        end)
+      end
+    )
+    if not started then
+      fail 'curl is not installed'
+    end
+  end)
+end
+
+-- Checked up front: show_no_focus would only refuse after the fetch and a pick.
+local function pick_cloud_session()
+  if any_claude_terminal() then
+    vim.notify('A Claude session is already running -- close it with <leader>ax to teleport.', vim.log.levels.WARN)
+    return
+  end
+  fetch_cloud_sessions(function(raw, err)
+    if not raw then
+      vim.notify('Cloud sessions: ' .. err .. ' -- using the TUI picker', vim.log.levels.WARN)
+      show_no_focus '--teleport'
+      return
+    end
+
+    local origin_url = vim.fn.systemlist({ 'git', 'remote', 'get-url', 'origin' })[1]
+    local here = vim.v.shell_error == 0 and repo_slug(origin_url) or nil
+    local entries = {}
+    for _, s in ipairs(raw) do
+      local id, status = json_field(s, 'id'), json_field(s, 'status')
+      if type(id) == 'string' and status ~= 'archived' then
+        local repo
+        local sources = json_field(json_field(s, 'config'), 'sources')
+        for _, src in ipairs(type(sources) == 'table' and sources or {}) do
+          if json_field(src, 'type') == 'git_repository' then
+            repo = repo_slug(json_field(src, 'url'))
+          end
+        end
+        local title = json_field(s, 'title')
+        local worker_status = json_field(s, 'worker_status') or status
+        local stamp = json_field(s, 'last_event_at') or json_field(s, 'created_at')
+        table.insert(entries, {
+          id = id,
+          title = (type(title) == 'string' and title ~= '') and title or 'Untitled',
+          repo = repo or '(no repo)',
+          status = type(worker_status) == 'string' and worker_status or '',
+          mtime = utc_epoch(type(stamp) == 'string' and stamp or nil),
+          origin = (here and repo == here) and 'here' or 'other',
+        })
+      end
+    end
+    if #entries == 0 then
+      vim.notify 'No cloud sessions to teleport'
+      return
+    end
+
+    -- Teleport needs a checkout of the session's repo, so this one's go first.
+    table.sort(entries, function(a, b)
+      local ra, rb = ORIGIN_RANK[a.origin], ORIGIN_RANK[b.origin]
+      if ra ~= rb then
+        return ra < rb
+      end
+      return a.mtime > b.mtime
+    end)
+
+    local pickers = require 'telescope.pickers'
+    local finders = require 'telescope.finders'
+    local conf = require('telescope.config').values
+    local actions = require 'telescope.actions'
+    local action_state = require 'telescope.actions.state'
+
+    pickers
+      .new({}, {
+        prompt_title = 'Teleport Cloud Session',
+        finder = finders.new_table {
+          results = entries,
+          entry_maker = function(entry)
+            local make_display = function(e)
+              local repo_str = '  ' .. e.repo
+              local tail = '  ' .. e.status .. '  ' .. relative_time(e.mtime)
+              local display = e.title .. repo_str .. tail
+              if e.origin == 'other' then
+                return display, { { { 0, #display }, 'LspInlayHint' } }
+              end
+              return display,
+                {
+                  { { #e.title, #e.title + #repo_str }, ORIGIN_PATH_HL.here },
+                  { { #e.title + #repo_str, #display }, 'Special' },
+                }
+            end
+            return vim.tbl_extend('force', entry, {
+              value = entry.id,
+              display = make_display,
+              ordinal = entry.title .. ' ' .. entry.repo,
+            })
+          end,
+        },
+        sorter = conf.generic_sorter {},
+        attach_mappings = function(prompt_bufnr, map)
+          local function teleport()
+            local selection = action_state.get_selected_entry()
+            if not selection then
+              return
+            end
+            actions.close(prompt_bufnr)
+            show_no_focus('--teleport ' .. selection.value)
+          end
+          map('i', '<CR>', teleport)
+          map('n', '<CR>', teleport)
+          return true
+        end,
+      })
+      :find()
+  end)
 end
 
 -- Claude runs with its cwd in the worktree while nvim's stays put.
@@ -714,7 +914,8 @@ local function terminal_tail(bufnr)
   return vim.api.nvim_buf_get_lines(bufnr, math.max(0, count - SCRAPE_TAIL_LINES), -1, false)
 end
 
-local function get_claude_suggestion()
+-- The input box's text, '' when it is empty, nil when no input box is showing.
+local function input_box_text()
   local ok, term = pcall(require, 'claudecode.terminal')
   if not ok then
     return nil
@@ -762,7 +963,7 @@ local function get_claude_suggestion()
     content[#content + 1] = lines[i]
   end
   if #content == 0 then
-    return nil
+    return ''
   end
   -- Drop the prompt marker, right-trim each line's box padding, trim the block.
   content[1] = content[1]:gsub('^%s*', ''):gsub('^\u{276f}%s?', ''):gsub('^>%s?', '')
@@ -770,11 +971,12 @@ local function get_claude_suggestion()
     content[i] = (l:gsub('%s+$', ''))
   end
   -- The empty box is padded with U+00A0, which Lua's %s does not match.
-  local text = table.concat(content, '\n'):gsub('\u{00a0}', ' '):gsub('^%s+', ''):gsub('%s+$', '')
-  if text == '' then
-    return nil
-  end
-  return text
+  return (table.concat(content, '\n'):gsub('\u{00a0}', ' '):gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
+local function get_claude_suggestion()
+  local text = input_box_text()
+  return text ~= '' and text or nil
 end
 
 -- Claude's mention format: "@lua/config/claude.lua#L10-20", cwd-relative, 1-indexed.
@@ -938,7 +1140,7 @@ local function is_claude_terminal(buf)
   return cmd:find('claude', 1, true) ~= nil
 end
 
-local function any_claude_terminal()
+any_claude_terminal = function()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if is_claude_terminal(buf) then
       return true
@@ -1086,6 +1288,23 @@ require('util.ai').register('claude', {
     end, 100)
     return true
   end,
+  -- Each line pasted, so no character fires a binding (` is chat:cancel here),
+  -- joined by LF, which is Ctrl+J, chat:newline. Refused while a dialog has
+  -- focus, where pasted digits or a newline would answer it.
+  stage = function(text)
+    if input_box_text() == nil or scrape_claude_question() then
+      return false
+    end
+    local lines = vim.split((text:gsub('\r\n?', '\n')), '\n')
+    for i, line in ipairs(lines) do
+      lines[i] = line ~= '' and ('\27[200~' .. line .. '\27[201~') or ''
+    end
+    return send_raw(table.concat(lines, '\n'))
+  end,
+  -- One backspace per grapheme, which is what the TUI deletes per keypress.
+  unstage = function(text)
+    return send_raw(('\127'):rep(vim.fn.strchars((text:gsub('\r\n?', '\n')), 1)))
+  end,
   -- Claude's alone: they read its TUI. The box reaches them with `try`.
   scrape_suggestion = get_claude_suggestion,
   scrape_question = scrape_claude_question,
@@ -1101,13 +1320,12 @@ require('util.ai').register('claude', {
   attach_buffer = function()
     vim.cmd 'ClaudeCodeAdd %'
   end,
-  -- nvim-side picker over ~/.claude/projects; find_session_cli is the in-TUI one.
+  -- nvim-side picker over ~/.claude/projects.
   find_session = function()
     pick_claude_session()
   end,
-  find_session_cli = function()
-    vim.cmd 'ClaudeCode --resume'
-  end,
+  -- nvim-side picker over the claude.ai/code sessions `--teleport` lists.
+  teleport = pick_cloud_session,
   worktree_continue = continue_in_worktree,
   worktree_session = pick_worktree_session,
   -- claudecode.nvim's MCP diff protocol, which omp.nvim has no equivalent for.
@@ -1142,6 +1360,10 @@ require('util.ai').register('claude', {
   interrupt = function()
     send_raw '`'
   end,
+  -- Ctrl+X Ctrl+S is chat:sendNow; Ctrl+Enter doesn't survive :terminal.
+  send_now = function()
+    send_raw '\24\19'
+  end,
   -- Next question tab; <leader><leader> re-scrapes whichever is shown.
   next_tab = function()
     send_raw '\t'
@@ -1174,7 +1396,7 @@ return {
         -- Every field is annotated required, but the plugin merges over defaults.
         ---@diagnostic disable-next-line: missing-fields
         terminal = {
-          split_width_percentage = 0.45,
+          split_width_percentage = require('util.ai').PANEL_WIDTH,
           -- Must be here: build_config drops per-call overrides defaulting to nil.
           cwd_provider = function()
             local dir = worktree_cwd

@@ -3,6 +3,9 @@
 
 local M = {}
 
+-- Share of the columns every backend's terminal split takes.
+M.PANEL_WIDTH = 0.5
+
 -- Declaration order is the picker order and the fallback preference.
 local BACKENDS = {
   {
@@ -222,6 +225,9 @@ end
 
 -- Warns rather than no-ops: with two agents running, silence looks the same as
 -- having sent the keystroke to the wrong one.
+-- Ops that can take a draft the prompt box staged out of the agent's input.
+local CLEARS_INPUT = { send_now = true, accept = true, interrupt = true, kill = true }
+
 function M.call(op, ...)
   local spec = M.get()
   local fn = ops[spec.name] and ops[spec.name][op]
@@ -230,6 +236,10 @@ function M.call(op, ...)
     return
   end
   ensure_loaded(spec)
+  local prompt = CLEARS_INPUT[op] and package.loaded['util.ai.prompt']
+  if prompt then
+    prompt.forget_staged()
+  end
   return fn(...)
 end
 
