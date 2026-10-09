@@ -1196,6 +1196,10 @@ local function toggle_no_focus(cmd_args)
   end
 end
 
+-- workmux windows (CLAUDE_WM on nvim's command) keep the worktree's Claude in
+-- a hidden tmux session; the split attaches to it instead of starting one.
+local WM_CLAUDE = vim.env.CLAUDE_WM ~= nil and vim.env.TMUX ~= nil
+
 -- Neovim auto-follows terminal output only in the *focused* window, and
 -- terminal buffers fire no on_lines for PTY output -- so poll instead.
 local autoscroll_timer = nil
@@ -1394,8 +1398,11 @@ return {
       'ClaudeCodeSelectModel',
     },
     -- No `keys`: core/keymaps.lua declares them all, so `cmd` is what loads this.
+    -- Under workmux the server must be up for the session's --ide to find.
+    lazy = not WM_CLAUDE,
     config = function()
       require('claudecode').setup {
+        terminal_cmd = WM_CLAUDE and vim.fn.expand '~/.config/tmux/scripts/wm-claude.sh attach' or nil,
         -- Every field is annotated required, but the plugin merges over defaults.
         ---@diagnostic disable-next-line: missing-fields
         terminal = {
