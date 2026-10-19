@@ -54,9 +54,6 @@ return {
         end, 'blame')
         map('n', '<leader>gV', gs.preview_hunk_inline, 'inline_diff')
         map({ 'o', 'x' }, 'ih', ':<C-U>Gitsigns select_hunk<CR>', 'select_hunk')
-
-        -- Feed hunk marks to the scrollbar.
-        require('scrollbar.handlers.gitsigns').setup()
       end,
     },
   },

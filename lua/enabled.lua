@@ -32,7 +32,6 @@ return {
   'folke/edgy.nvim',
   'utilyre/barbecue.nvim',
   'petertriho/nvim-scrollbar',
-  'kevinhwang91/nvim-hlslens',
   'nvim-zh/colorful-winsep.nvim',
   'lukas-reineke/indent-blankline.nvim',
 
